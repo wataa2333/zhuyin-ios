@@ -1,0 +1,9 @@
+Lexicon.tsv is a derived dictionary. It converts Pinyin to Zhuyin, attaches tones,
+normalizes entries to simplified script, and reorders and deduplicates entries.
+
+- Rime pinyin_simp.dict.yaml, derived from Android Pinyin IME, Apache-2.0.
+  https://github.com/rime/rime-pinyin-simp/tree/0c6861ef7420ee780270ca6d993d18d4101049d0
+- mozillazg/pinyin-data, MIT.
+  https://github.com/mozillazg/pinyin-data/tree/fe29ad32bdf352b31a02b9936e537f575432e9a6
+- OpenCC TSCharacters.txt, Apache-2.0.
+  https://github.com/BYVoid/OpenCC/tree/fae2a0a911c30764e669a7d8b0591cd8e852934a

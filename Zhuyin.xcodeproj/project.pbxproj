@@ -1,0 +1,245 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		10A000000000000000000001 /* ZhuyinApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10A000000000000000000011; };
+		10A000000000000000000002 /* KeyboardViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10A000000000000000000012; };
+		10A000000000000000000003 /* ZhuyinEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10A000000000000000000013; };
+		10A000000000000000000004 /* Lexicon.tsv in Resources */ = {isa = PBXBuildFile; fileRef = 10A000000000000000000014; };
+		10A000000000000000000005 /* Notices in Resources */ = {isa = PBXBuildFile; fileRef = 10A000000000000000000015; };
+		10A000000000000000000006 /* ZhuyinKeyboard.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 10A000000000000000000018; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		10A000000000000000000020 = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 10A000000000000000000070;
+			proxyType = 1;
+			remoteGlobalIDString = 10A000000000000000000052;
+			remoteInfo = ZhuyinKeyboard;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		10A000000000000000000035 /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (10A000000000000000000006, );
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		10A000000000000000000011 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZhuyinApp.swift; sourceTree = "<group>"; };
+		10A000000000000000000012 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardViewController.swift; sourceTree = "<group>"; };
+		10A000000000000000000013 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZhuyinEngine.swift; sourceTree = "<group>"; };
+		10A000000000000000000014 = {isa = PBXFileReference; lastKnownFileType = text; path = Lexicon.tsv; sourceTree = "<group>"; };
+		10A000000000000000000015 = {isa = PBXFileReference; lastKnownFileType = folder; path = Notices; sourceTree = "<group>"; };
+		10A000000000000000000016 = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		10A000000000000000000017 = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Zhuyin.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		10A000000000000000000018 = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ZhuyinKeyboard.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		10A000000000000000000036 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		10A000000000000000000037 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		10A000000000000000000041 = {
+			isa = PBXGroup;
+			children = (10A000000000000000000042, 10A000000000000000000043, 10A000000000000000000044, );
+			sourceTree = "<group>";
+		};
+		10A000000000000000000042 = {
+			isa = PBXGroup;
+			children = (10A000000000000000000011, );
+			path = App;
+			sourceTree = "<group>";
+		};
+		10A000000000000000000043 = {
+			isa = PBXGroup;
+			children = (10A000000000000000000012, 10A000000000000000000013, 10A000000000000000000014, 10A000000000000000000015, 10A000000000000000000016, );
+			path = Keyboard;
+			sourceTree = "<group>";
+		};
+		10A000000000000000000044 = {
+			isa = PBXGroup;
+			children = (10A000000000000000000017, 10A000000000000000000018, );
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		10A000000000000000000051 /* Zhuyin */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 10A000000000000000000082;
+			buildPhases = (10A000000000000000000031, 10A000000000000000000036, 10A000000000000000000033, 10A000000000000000000035, );
+			buildRules = ();
+			dependencies = (10A000000000000000000021, );
+			name = Zhuyin;
+			productName = Zhuyin;
+			productReference = 10A000000000000000000017;
+			productType = "com.apple.product-type.application";
+		};
+		10A000000000000000000052 /* ZhuyinKeyboard */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 10A000000000000000000083;
+			buildPhases = (10A000000000000000000032, 10A000000000000000000037, 10A000000000000000000034, );
+			buildRules = ();
+			dependencies = ();
+			name = ZhuyinKeyboard;
+			productName = ZhuyinKeyboard;
+			productReference = 10A000000000000000000018;
+			productType = "com.apple.product-type.app-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		10A000000000000000000070 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					10A000000000000000000051 = {CreatedOnToolsVersion = 16.0; };
+					10A000000000000000000052 = {CreatedOnToolsVersion = 16.0; };
+				};
+			};
+			buildConfigurationList = 10A000000000000000000081;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = "zh-Hans";
+			hasScannedForEncodings = 0;
+			knownRegions = ("zh-Hans", Base, );
+			mainGroup = 10A000000000000000000041;
+			productRefGroup = 10A000000000000000000044;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (10A000000000000000000051, 10A000000000000000000052, );
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		10A000000000000000000033 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		10A000000000000000000034 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (10A000000000000000000004, 10A000000000000000000005, ); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		10A000000000000000000031 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (10A000000000000000000001, ); runOnlyForDeploymentPostprocessing = 0; };
+		10A000000000000000000032 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (10A000000000000000000002, 10A000000000000000000003, ); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		10A000000000000000000021 = {isa = PBXTargetDependency; target = 10A000000000000000000052; targetProxy = 10A000000000000000000020; };
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		10A000000000000000000061 = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MARKETING_VERSION = 0.1.0;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		10A000000000000000000062 = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MARKETING_VERSION = 0.1.0;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		10A000000000000000000063 = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "简体注音";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", );
+				PRODUCT_BUNDLE_IDENTIFIER = org.example.dynamiczhuyin;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Debug;
+		};
+		10A000000000000000000064 = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "简体注音";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", );
+				PRODUCT_BUNDLE_IDENTIFIER = org.example.dynamiczhuyin;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Release;
+		};
+		10A000000000000000000065 = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Keyboard/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks", );
+				PRODUCT_BUNDLE_IDENTIFIER = org.example.dynamiczhuyin.keyboard;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+			};
+			name = Debug;
+		};
+		10A000000000000000000066 = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Keyboard/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks", );
+				PRODUCT_BUNDLE_IDENTIFIER = org.example.dynamiczhuyin.keyboard;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		10A000000000000000000081 = {isa = XCConfigurationList; buildConfigurations = (10A000000000000000000061, 10A000000000000000000062, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		10A000000000000000000082 = {isa = XCConfigurationList; buildConfigurations = (10A000000000000000000063, 10A000000000000000000064, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		10A000000000000000000083 = {isa = XCConfigurationList; buildConfigurations = (10A000000000000000000065, 10A000000000000000000066, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+/* End XCConfigurationList section */
+	};
+	rootObject = 10A000000000000000000070 /* Project object */;
+}
