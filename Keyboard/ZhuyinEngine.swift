@@ -188,7 +188,8 @@ struct Lexicon: Sendable {
     func candidates(for composition: Composition, learned: [Candidate] = []) -> [Candidate] {
         let input = composition.syllables
         guard let first = input.first else { return [] }
-        let hasOpenSyllable = !composition.current.symbols.isEmpty
+        // For phrases, setting the last syllable's tone still allows the remaining symbols to be predicted.
+        let canCompleteLast = input.count > 1 || !composition.current.symbols.isEmpty
         var exact: [Candidate] = []
         var completions: [Candidate] = []
         var prefixes: [Candidate] = []
@@ -200,7 +201,7 @@ struct Lexicon: Sendable {
             let count = entry.reading.count
             guard count <= input.count else { continue }
             let matches = entry.reading.indices.allSatisfy { index in
-                input[index].matches(entry.reading[index], allowPrefix: hasOpenSyllable && index == input.count - 1)
+                input[index].matches(entry.reading[index], allowPrefix: canCompleteLast && index == input.count - 1)
             }
             guard matches else { continue }
             if count < input.count {
@@ -215,7 +216,7 @@ struct Lexicon: Sendable {
         var ranked = exact + completions
         if ranked.isEmpty, input.count > 1 {
             let words = input.enumerated().compactMap { index, syllable in
-                bestCharacter(for: syllable, allowPrefix: hasOpenSyllable && index == input.count - 1)
+                bestCharacter(for: syllable, allowPrefix: index == input.count - 1)
             }
             if words.count == input.count {
                 ranked.append(Candidate(text: words.map(\.text).joined(), reading: words.flatMap(\.reading)))
