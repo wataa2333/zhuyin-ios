@@ -58,7 +58,7 @@ final class KeyboardViewController: UIInputViewController {
     private var displayedGlobe = false
     private var displayedReturn = ""
     private var displayedPinyin = false
-    private var keyLayouts: [Page: KeyboardPageView] = [:]
+    private var keyLayouts: [Page: UIStackView] = [:]
     private var returnTitle = "换行"
 
     private let rows = UIView()
@@ -169,6 +169,8 @@ final class KeyboardViewController: UIInputViewController {
         setCandidatePanelVisible(false)
 
         configureKeyPreview()
+        returnTitle = currentReturnTitle()
+        render()
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -481,12 +483,20 @@ final class KeyboardViewController: UIInputViewController {
             cached.isHidden = false
             return
         }
-        let rowSpacing: CGFloat
-        if #available(iOS 26.0, *) { rowSpacing = 11 } else { rowSpacing = 8 }
-        let layout = KeyboardPageView(keyRows: keysForPage().map(makeRow), rowSpacing: rowSpacing)
-        layout.frame = rows.bounds
-        layout.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        let layout = UIStackView(arrangedSubviews: keysForPage().map(makeRow))
+        layout.axis = .vertical
+        layout.distribution = .fillEqually
+        if #available(iOS 26.0, *) { layout.spacing = 11 } else { layout.spacing = 8 }
+        // The host can measure the keyboard before giving it a height.
+        // Keep the key rows in the constraint chain so they contribute their intrinsic size.
+        layout.translatesAutoresizingMaskIntoConstraints = false
         rows.addSubview(layout)
+        NSLayoutConstraint.activate([
+            layout.leadingAnchor.constraint(equalTo: rows.leadingAnchor),
+            layout.trailingAnchor.constraint(equalTo: rows.trailingAnchor),
+            layout.topAnchor.constraint(equalTo: rows.topAnchor),
+            layout.bottomAnchor.constraint(equalTo: rows.bottomAnchor)
+        ])
         keyLayouts[page] = layout
     }
 
@@ -571,8 +581,10 @@ final class KeyboardViewController: UIInputViewController {
         }
     }
 
-    private func makeRow(_ keys: [Key]) -> KeyboardPageView.Row {
-        keys.map { key in
+    private func makeRow(_ keys: [Key]) -> UIStackView {
+        let row = UIStackView()
+        row.spacing = 6
+        for key in keys {
             let element: UIView
             if key.title.isEmpty, key.systemImage == nil {
                 element = UIView()
@@ -600,6 +612,7 @@ final class KeyboardViewController: UIInputViewController {
                     button.layer.cornerRadius = 9
                     button.layer.shadowOpacity = 0.08
                 }
+                button.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
                 if let image = key.systemImage {
                     button.setImage(UIImage(systemName: image, withConfiguration: UIImage.SymbolConfiguration(pointSize: 17)), for: .normal)
                 } else if key.title == "注" {
@@ -646,8 +659,14 @@ final class KeyboardViewController: UIInputViewController {
                 }
                 element = button
             }
-            return (element, key.weight)
+            row.addArrangedSubview(element)
+            if let first = row.arrangedSubviews.first, first !== element {
+                let constraint = element.widthAnchor.constraint(equalTo: first.widthAnchor, multiplier: key.weight / keys[0].weight)
+                constraint.priority = UILayoutPriority(999)
+                constraint.isActive = true
+            }
         }
+        return row
     }
 
     private func configureKeyPreview() {
@@ -794,47 +813,6 @@ final class KeyboardViewController: UIInputViewController {
 
 private final class KeyboardInputView: UIInputView, UIInputViewAudioFeedback {
     var enableInputClicksWhenVisible: Bool { true }
-}
-
-private final class KeyboardPageView: UIView {
-    typealias Row = [(view: UIView, weight: CGFloat)]
-
-    private let keyRows: [Row]
-    private let rowWeights: [CGFloat]
-    private let rowSpacing: CGFloat
-    private let keySpacing: CGFloat = 6
-    private var previousSize: CGSize?
-
-    init(keyRows: [Row], rowSpacing: CGFloat) {
-        self.keyRows = keyRows
-        rowWeights = keyRows.map { row in row.reduce(0) { $0 + $1.weight } }
-        self.rowSpacing = rowSpacing
-        super.init(frame: .zero)
-        for row in keyRows {
-            for key in row { addSubview(key.view) }
-        }
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("Keyboard pages are built in code") }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        guard previousSize != bounds.size else { return }
-        previousSize = bounds.size
-        let height = max(0, (bounds.height - CGFloat(keyRows.count - 1) * rowSpacing) / CGFloat(keyRows.count))
-        for (index, row) in keyRows.enumerated() {
-            let width = max(0, bounds.width - CGFloat(row.count - 1) * keySpacing)
-            let unitWidth = width / rowWeights[index]
-            let y = CGFloat(index) * (height + rowSpacing)
-            var x: CGFloat = 0
-            for key in row {
-                let keyWidth = unitWidth * key.weight
-                key.view.frame = CGRect(x: x, y: y, width: keyWidth, height: height)
-                x += keyWidth + keySpacing
-            }
-        }
-    }
 }
 
 private final class CandidateExpandButton: UIButton {
