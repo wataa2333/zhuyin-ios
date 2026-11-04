@@ -214,19 +214,51 @@ struct Lexicon: Sendable {
         }
 
         var ranked = exact + completions
-        if ranked.isEmpty, input.count > 1 {
-            let words = input.enumerated().compactMap { index, syllable in
-                bestCharacter(for: syllable, allowPrefix: index == input.count - 1)
-            }
-            if words.count == input.count {
-                ranked.append(Candidate(text: words.map(\.text).joined(), reading: words.flatMap(\.reading)))
-            }
+        if ranked.isEmpty, input.count > 1, let phrase = segmentedCandidate(for: input) {
+            ranked.append(phrase)
         }
         ranked.append(contentsOf: prefixes)
         var seen: Set<String> = []
         // A lazy filter can evaluate its predicate again when slicing or iterating.
         let unique = ranked.filter { seen.insert($0.text).inserted }
         return Array(unique.prefix(48))
+    }
+
+    private func segmentedCandidate(for input: [Syllable]) -> Candidate? {
+        // Find the fewest dictionary words that cover each suffix, keeping dictionary order for ties.
+        var choices = Array<Candidate?>(repeating: nil, count: input.count)
+        var wordCounts = Array(repeating: Int.max, count: input.count + 1)
+        wordCounts[input.count] = 0
+        for start in input.indices.reversed() {
+            let sound = input[start].symbols
+            for word in entriesByFirstSyllable[sound, default: []] where word.syllableCount > 1 {
+                let end = start + word.syllableCount
+                guard end <= input.count, wordCounts[end] < wordCounts[start] - 1 else { continue }
+                guard word.reading.indices.allSatisfy({ index in
+                    let position = start + index
+                    return input[position].matches(word.reading[index], allowPrefix: position == input.count - 1)
+                }) else { continue }
+                choices[start] = word
+                wordCounts[start] = 1 + wordCounts[end]
+                if end == input.count { break }
+            }
+            if wordCounts[start + 1] < wordCounts[start] - 1,
+               let character = bestCharacter(for: input[start], allowPrefix: start == input.count - 1) {
+                choices[start] = character
+                wordCounts[start] = 1 + wordCounts[start + 1]
+            }
+        }
+
+        var position = 0
+        var text = ""
+        var reading: [Syllable] = []
+        while position < input.count {
+            guard let word = choices[position] else { return nil }
+            text += word.text
+            reading.append(contentsOf: word.reading)
+            position += word.syllableCount
+        }
+        return Candidate(text: text, reading: reading)
     }
 
     private func bestCharacter(for syllable: Syllable, allowPrefix: Bool) -> Candidate? {

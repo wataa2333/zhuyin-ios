@@ -117,17 +117,22 @@ final class KeyboardViewController: UIInputViewController {
         let divider = UIView()
         divider.backgroundColor = .separator
         divider.widthAnchor.constraint(equalToConstant: 1 / 3).isActive = true
-        expandCandidates.widthAnchor.constraint(equalToConstant: 44).isActive = true
         let sideInset: CGFloat = 7
+        let arrowSlot = UIView()
+        arrowSlot.addSubview(expandCandidates)
+        expandCandidates.translatesAutoresizingMaskIntoConstraints = false
         var arrowConfiguration = UIButton.Configuration.plain()
         arrowConfiguration.baseForegroundColor = .label
-        arrowConfiguration.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 0, bottom: 4, trailing: 0)
+        arrowConfiguration.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 0, bottom: 4, trailing: sideInset)
         expandCandidates.configuration = arrowConfiguration
         expandCandidates.addAction(UIAction { [weak self] _ in
             guard let self else { return }
             self.setCandidatePanelVisible(!self.showsCandidatePanel, animated: true)
         }, for: .touchUpInside)
-        let toolbar = UIStackView(arrangedSubviews: [candidateScroll, divider, expandCandidates])
+        let toolbar = UIStackView(arrangedSubviews: [candidateScroll, divider, arrowSlot])
+        toolbar.insetsLayoutMarginsFromSafeArea = false
+        toolbar.isLayoutMarginsRelativeArrangement = true
+        toolbar.layoutMargins = UIEdgeInsets(top: 0, left: sideInset, bottom: 0, right: 0)
         toolbar.spacing = 3
         toolbar.heightAnchor.constraint(equalToConstant: Self.candidateBarHeight).isActive = true
         keyArea.clipsToBounds = true
@@ -144,16 +149,21 @@ final class KeyboardViewController: UIInputViewController {
         view.addSubview(layout)
         let area = view.safeAreaLayoutGuide
         NSLayoutConstraint.activate([
-            layout.leadingAnchor.constraint(equalTo: area.leadingAnchor, constant: sideInset),
-            layout.trailingAnchor.constraint(equalTo: area.trailingAnchor, constant: -sideInset),
+            layout.leadingAnchor.constraint(equalTo: area.leadingAnchor),
+            layout.trailingAnchor.constraint(equalTo: area.trailingAnchor),
             layout.topAnchor.constraint(equalTo: view.topAnchor, constant: 1),
             layout.bottomAnchor.constraint(equalTo: area.bottomAnchor),
-            rows.leadingAnchor.constraint(equalTo: keyArea.leadingAnchor),
-            rows.trailingAnchor.constraint(equalTo: keyArea.trailingAnchor),
+            arrowSlot.widthAnchor.constraint(equalToConstant: 44 + sideInset),
+            expandCandidates.leadingAnchor.constraint(equalTo: arrowSlot.leadingAnchor),
+            expandCandidates.trailingAnchor.constraint(equalTo: arrowSlot.trailingAnchor),
+            expandCandidates.topAnchor.constraint(equalTo: arrowSlot.topAnchor),
+            expandCandidates.bottomAnchor.constraint(equalTo: arrowSlot.bottomAnchor),
+            rows.leadingAnchor.constraint(equalTo: keyArea.leadingAnchor, constant: sideInset),
+            rows.trailingAnchor.constraint(equalTo: keyArea.trailingAnchor, constant: -sideInset),
             rows.topAnchor.constraint(equalTo: keyArea.topAnchor),
             rows.bottomAnchor.constraint(equalTo: keyArea.bottomAnchor),
-            candidateGridScroll.leadingAnchor.constraint(equalTo: keyArea.leadingAnchor),
-            candidateGridScroll.trailingAnchor.constraint(equalTo: keyArea.trailingAnchor),
+            candidateGridScroll.leadingAnchor.constraint(equalTo: rows.leadingAnchor),
+            candidateGridScroll.trailingAnchor.constraint(equalTo: rows.trailingAnchor),
             candidateGridScroll.topAnchor.constraint(equalTo: keyArea.topAnchor),
             candidateGridScroll.bottomAnchor.constraint(equalTo: keyArea.bottomAnchor)
         ])
@@ -222,8 +232,7 @@ final class KeyboardViewController: UIInputViewController {
         if viewport != candidateViewportWidth || gridWidth != candidateGridWidth {
             candidateViewportWidth = viewport
             candidateGridWidth = gridWidth
-            updateCandidateArrow()
-            if showsCandidatePanel { updateCandidateGrid() }
+            refreshCandidatePanel()
         }
     }
 
@@ -336,10 +345,8 @@ final class KeyboardViewController: UIInputViewController {
         }
         candidateScroll.contentSize = CGSize(width: max(0, x - 1), height: Self.candidateBarHeight)
         candidateScroll.setContentOffset(.zero, animated: false)
-        updateCandidateArrow()
-        if showsCandidatePanel {
-            updateCandidateGrid()
-        } else {
+        refreshCandidatePanel()
+        if !showsCandidatePanel {
             // A selection may refresh the first row while the old grid is fading out.
             candidateGridScroll.isHidden = true
         }
@@ -388,7 +395,16 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func updateCandidateArrow() {
-        expandCandidates.isEnabled = showsCandidatePanel || hasMoreCandidates
+        expandCandidates.isHidden = !showsCandidatePanel && !hasMoreCandidates
+    }
+
+    private func refreshCandidatePanel() {
+        if showsCandidatePanel, candidateScroll.bounds.width > 0, !hasMoreCandidates {
+            setCandidatePanelVisible(false)
+        } else {
+            updateCandidateArrow()
+            if showsCandidatePanel { updateCandidateGrid() }
+        }
     }
 
     private func setCandidatePanelVisible(_ visible: Bool, animated: Bool = false) {

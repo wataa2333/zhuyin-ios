@@ -36,6 +36,26 @@ WORD_READINGS = {
     "输入法": "shū rù fǎ", "电脑": "diàn nǎo", "软件": "ruǎn jiàn",
     "音乐": "yīn yuè", "快乐": "kuài lè", "银行": "yín háng",
     "长大": "zhǎng dà", "重庆": "chóng qìng",
+    "有什么": "yǒu shén me", "没什么": "méi shén me",
+    "想什么": "xiǎng shén me", "说什么": "shuō shén me",
+    "要什么": "yào shén me", "在干什么": "zài gàn shén me",
+    "你在干嘛": "nǐ zài gàn má", "什么情况": "shén me qíng kuàng",
+    "有时间": "yǒu shí jiān", "没时间": "méi shí jiān",
+    "为什么呢": "wèi shén me ne", "怎么了": "zěn me le",
+    "等一下": "děng yí xià", "不用谢": "bú yòng xiè",
+    "没问题": "méi wèn tí", "没办法": "méi bàn fǎ",
+    "在哪里": "zài nǎ lǐ", "好不好": "hǎo bu hǎo",
+    "觉得": "jué de", "漂亮": "piào liang",
+    "时候": "shí hou", "知道": "zhī dao", "东西": "dōng xi",
+    "喜欢": "xǐ huan", "意思": "yì si", "认识": "rèn shi",
+    "明白": "míng bai", "麻烦": "má fan", "舒服": "shū fu",
+    "什么意思": "shén me yì si",
+}
+
+# Readings that only came from assigning each character its first listed tone.
+REJECTED_READINGS = {
+    "觉得": "jué dé",
+    "漂亮": "piāo liàng",
 }
 
 
@@ -127,10 +147,16 @@ def build(rime, pinyin_data, opencc):
             key = (text, " ".join(sound + tone for sound, tone in zip(sounds, reading)))
             entries[key] = max(int(weight), entries.get(key, 0))
 
+    for text, pinyin in REJECTED_READINGS.items():
+        entries.pop((text, encode_reading(pinyin)), None)
     for text, pinyin in WORD_READINGS.items():
-        reading = " ".join(to_zhuyin(base) + tone for base, tone in map(split_tone, pinyin.split()))
+        reading = encode_reading(pinyin)
         entries[(text, reading)] = 1_000_000_000
     return entries
+
+
+def encode_reading(pinyin):
+    return " ".join(to_zhuyin(base) + tone for base, tone in map(split_tone, pinyin.split()))
 
 
 def main():
