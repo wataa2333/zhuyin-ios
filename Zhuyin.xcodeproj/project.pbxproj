@@ -12,6 +12,8 @@
 		10A000000000000000000004 /* Lexicon.tsv in Resources */ = {isa = PBXBuildFile; fileRef = 10A000000000000000000014; };
 		10A000000000000000000005 /* Notices in Resources */ = {isa = PBXBuildFile; fileRef = 10A000000000000000000015; };
 		10A000000000000000000006 /* ZhuyinKeyboard.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 10A000000000000000000018; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		10A000000000000000000007 /* KeyboardPreferences.swift in App Sources */ = {isa = PBXBuildFile; fileRef = 10A000000000000000000019; };
+		10A000000000000000000008 /* KeyboardPreferences.swift in Keyboard Sources */ = {isa = PBXBuildFile; fileRef = 10A000000000000000000019; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -45,6 +47,8 @@
 		10A000000000000000000016 = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		10A000000000000000000017 = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Zhuyin.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		10A000000000000000000018 = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ZhuyinKeyboard.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		10A000000000000000000019 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardPreferences.swift; sourceTree = "<group>"; };
+		10A00000000000000000001A = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Zhuyin.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -55,7 +59,7 @@
 /* Begin PBXGroup section */
 		10A000000000000000000041 = {
 			isa = PBXGroup;
-			children = (10A000000000000000000042, 10A000000000000000000043, 10A000000000000000000044, );
+			children = (10A000000000000000000042, 10A000000000000000000043, 10A000000000000000000045, 10A000000000000000000044, );
 			sourceTree = "<group>";
 		};
 		10A000000000000000000042 = {
@@ -74,6 +78,12 @@
 			isa = PBXGroup;
 			children = (10A000000000000000000017, 10A000000000000000000018, );
 			name = Products;
+			sourceTree = "<group>";
+		};
+		10A000000000000000000045 = {
+			isa = PBXGroup;
+			children = (10A000000000000000000019, 10A00000000000000000001A, );
+			path = Shared;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -134,8 +144,8 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		10A000000000000000000031 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (10A000000000000000000001, ); runOnlyForDeploymentPostprocessing = 0; };
-		10A000000000000000000032 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (10A000000000000000000002, 10A000000000000000000003, ); runOnlyForDeploymentPostprocessing = 0; };
+		10A000000000000000000031 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (10A000000000000000000001, 10A000000000000000000007, ); runOnlyForDeploymentPostprocessing = 0; };
+		10A000000000000000000032 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (10A000000000000000000002, 10A000000000000000000003, 10A000000000000000000008, ); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -178,6 +188,7 @@
 		10A000000000000000000063 = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Shared/Zhuyin.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "简体注音";
@@ -193,6 +204,7 @@
 		10A000000000000000000064 = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Shared/Zhuyin.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "简体注音";
@@ -209,6 +221,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = Shared/Zhuyin.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Keyboard/Info.plist;
@@ -223,6 +236,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = Shared/Zhuyin.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Keyboard/Info.plist;

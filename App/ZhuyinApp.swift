@@ -9,6 +9,9 @@ struct ZhuyinApp: App {
 
 private struct SetupView: View {
     @State private var text = ""
+    @State private var showsPinyin = KeyboardPreferences.showsPinyin
+    @State private var savingFailed = false
+    @FocusState private var isTyping: Bool
 
     var body: some View {
         NavigationStack {
@@ -20,9 +23,19 @@ private struct SetupView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                Section("键盘设置") {
+                    Toggle("按键显示拼音", isOn: Binding(get: { showsPinyin }, set: setPinyin))
+                        .disabled(KeyboardPreferences.pinyinFile == nil)
+                    if KeyboardPreferences.pinyinFile == nil || savingFailed {
+                        Text("无法访问键盘设置。请确认 App 和键盘扩展的签名都包含共享容器权限。")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 Section("试打") {
                     TextField("在这里试打简体字和词组", text: $text, axis: .vertical)
                         .lineLimit(3...6)
+                        .focused($isTyping)
                     Text("试试 ㄋㄧˇ ㄏㄠˇ → 你好，或 ㄓㄨˋ ㄧ（一声）→ 注音。")
                         .foregroundStyle(.secondary)
                 }
@@ -30,10 +43,22 @@ private struct SetupView: View {
                 Section("动态布局") {
                     Text("输入声母或介音后自动切到韵母页。⇧ 可手动切页，韵母起头的音可从韵母页输入。")
                     Text("有未定调的注音时，空格键输入一声。定调后可继续输入下一个音节，或点击候选字词上屏。")
-                    Text("点候选栏右侧的箭头，可展开候选或开关按键拼音。常选字词会保存在设备上，下次输入时优先显示。")
+                    Text("点候选栏右侧的箭头可展开更多字词。点 123 进入数字页，再点 #+= 切到符号页。常选字词会保存在设备上。")
                 }
             }
             .navigationTitle("简体注音")
+        }
+    }
+
+    private func setPinyin(_ enabled: Bool) {
+        guard let file = KeyboardPreferences.pinyinFile else { return }
+        do {
+            try Data([enabled ? 1 : 0]).write(to: file, options: .atomic)
+            showsPinyin = enabled
+            savingFailed = false
+            isTyping = false
+        } catch {
+            savingFailed = true
         }
     }
 }

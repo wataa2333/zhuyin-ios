@@ -1,7 +1,7 @@
 import UIKit
 
 final class KeyboardViewController: UIInputViewController {
-    private enum Page: Equatable { case initials, finals, numbers, emoji }
+    private enum Page: Equatable { case initials, finals, numbers, symbols }
 
     private struct Key {
         let title: String
@@ -30,9 +30,14 @@ final class KeyboardViewController: UIInputViewController {
         "ㄢ": "an", "ㄣ": "en", "ㄤ": "ang", "ㄥ": "eng", "ㄦ": "er", "ㄧ": "i", "ㄨ": "u", "ㄩ": "ü"
     ]
 
-    private static let pinyinPreference = "showPinyinOnKeys"
     private static let starterCandidates = ["我", "你", "这", "那", "他", "有", "因为", "我们"]
-    private var showsPinyin = UserDefaults.standard.bool(forKey: KeyboardViewController.pinyinPreference)
+    private static let emojiByWord = [
+        "想": "🤔", "下": "⬇️", "心": "❤️", "爱": "❤️", "你好": "👋", "再见": "👋",
+        "笑": "😄", "哈哈": "😂", "哭": "😢", "生气": "😡", "谢谢": "🙏", "赞": "👍",
+        "恭喜": "🎉", "生日": "🎂", "生日快乐": "🎂", "晚安": "🌙", "太阳": "☀️", "下雨": "🌧️",
+        "苹果": "🍎", "咖啡": "☕", "猫": "🐱", "狗": "🐶", "花": "🌸", "火": "🔥"
+    ]
+    private var showsPinyin = KeyboardPreferences.showsPinyin
     private var composition = Composition()
     private var markedReading = ""
     private var updatingDocument = false
@@ -58,11 +63,10 @@ final class KeyboardViewController: UIInputViewController {
     private let candidateScroll = UIScrollView()
     private let candidateRow = UIStackView()
     private let expandCandidates = UIButton(type: .system)
-    private let candidatePanel = UIStackView()
     private let candidateGridScroll = UIScrollView()
     private let candidateGrid = UIStackView()
-    private let pinyinToggle = UIButton(type: .system)
     private var showsCandidatePanel = false
+    private var candidateTransition: UIViewPropertyAnimator?
     private var candidateGridWidth: CGFloat = 0
     private var keyboardHeight: NSLayoutConstraint?
 
@@ -81,10 +85,15 @@ final class KeyboardViewController: UIInputViewController {
         }
     }
 
+    override func loadView() {
+        let keyboard = UIInputView(frame: .zero, inputViewStyle: .keyboard)
+        keyboard.isOpaque = false
+        keyboard.backgroundColor = .clear
+        view = keyboard
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
-        installBackground()
-
         rows.axis = .vertical
         rows.distribution = .fillEqually
         rows.spacing = 8
@@ -114,7 +123,8 @@ final class KeyboardViewController: UIInputViewController {
         toolbar.spacing = 3
         toolbar.heightAnchor.constraint(equalToConstant: 38).isActive = true
         configureCandidatePanel()
-        for content in [rows, candidatePanel] {
+        keyArea.clipsToBounds = true
+        for content in [rows, candidateGridScroll] {
             content.translatesAutoresizingMaskIntoConstraints = false
             keyArea.addSubview(content)
             NSLayoutConstraint.activate([
@@ -149,6 +159,11 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        let updatedPinyin = KeyboardPreferences.showsPinyin
+        if showsPinyin != updatedPinyin {
+            showsPinyin = updatedPinyin
+            displayedPage = nil
+        }
         refreshDocument()
     }
 
@@ -183,33 +198,6 @@ final class KeyboardViewController: UIInputViewController {
         traitCollection.verticalSizeClass == .compact ? 198 : 264
     }
 
-    private func installBackground() {
-        if #available(iOS 26.0, *) {
-            view.isOpaque = false
-            view.backgroundColor = .clear
-            let material = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterial))
-            material.isUserInteractionEnabled = false
-            material.layer.cornerCurve = .continuous
-            material.layer.cornerRadius = 27
-            material.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
-            material.clipsToBounds = true
-            material.translatesAutoresizingMaskIntoConstraints = false
-            view.insertSubview(material, at: 0)
-            NSLayoutConstraint.activate([
-                material.topAnchor.constraint(equalTo: view.topAnchor),
-                material.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-                material.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-                material.trailingAnchor.constraint(equalTo: view.trailingAnchor)
-            ])
-        } else {
-            view.backgroundColor = UIColor { traits in
-                traits.userInterfaceStyle == .dark
-                    ? UIColor(white: 0.16, alpha: 1)
-                    : UIColor(red: 0.84, green: 0.85, blue: 0.88, alpha: 1)
-            }
-        }
-    }
-
     private func refreshDocument() {
         switch textDocumentProxy.keyboardAppearance {
         case .dark: view.overrideUserInterfaceStyle = .dark
@@ -228,28 +216,16 @@ final class KeyboardViewController: UIInputViewController {
         render()
     }
 
-    private func togglePinyin() {
-        showsPinyin.toggle()
-        UserDefaults.standard.set(showsPinyin, forKey: Self.pinyinPreference)
-        updatePinyinToggle()
-        displayedPage = nil
-        updateKeys()
-        setCandidatePanelVisible(false, animated: true)
-    }
-
-    private func updatePinyinToggle() {
-        var configuration = showsPinyin ? UIButton.Configuration.tinted() : .plain()
-        configuration.title = showsPinyin ? "拼音标注：开" : "拼音标注：关"
-        configuration.baseForegroundColor = showsPinyin ? .systemBlue : .secondaryLabel
-        configuration.contentInsets = .zero
-        configuration.cornerStyle = .capsule
-        pinyinToggle.configuration = configuration
-        pinyinToggle.accessibilityValue = showsPinyin ? "已开启" : "已关闭"
-    }
-
     private func render() {
         if composition.hasInput {
-            candidates = lexicon.candidates(for: composition, learned: userDictionary.candidates)
+            let words = lexicon.candidates(for: composition, learned: userDictionary.candidates)
+            var shownEmoji: Set<String> = []
+            candidates = words.flatMap { word -> [Candidate] in
+                guard let emoji = Self.emojiByWord[word.text], shownEmoji.insert(emoji).inserted else {
+                    return [word]
+                }
+                return [word, Candidate(text: emoji, reading: word.reading, isEmoji: true)]
+            }
         } else if alternatePage == nil {
             candidates = Self.starterCandidates.map { Candidate(text: $0) }
         } else {
@@ -286,15 +262,7 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func configureCandidatePanel() {
-        pinyinToggle.accessibilityLabel = "按键拼音标注"
-        pinyinToggle.addAction(UIAction { [weak self] _ in self?.togglePinyin() }, for: .touchUpInside)
-        pinyinToggle.heightAnchor.constraint(equalToConstant: 32).isActive = true
-        updatePinyinToggle()
-
-        candidatePanel.axis = .vertical
-        candidatePanel.spacing = 5
-        candidatePanel.addArrangedSubview(candidateGridScroll)
-        candidatePanel.addArrangedSubview(pinyinToggle)
+        candidateGridScroll.backgroundColor = .clear
         candidateGrid.axis = .vertical
         candidateGrid.spacing = 4
         candidateGridScroll.addSubview(candidateGrid)
@@ -311,26 +279,55 @@ final class KeyboardViewController: UIInputViewController {
 
     private func setCandidatePanelVisible(_ visible: Bool, animated: Bool = false) {
         let changed = showsCandidatePanel != visible
+        if let transition = candidateTransition {
+            transition.stopAnimation(true)
+            candidateTransition = nil
+            finishCandidateTransition(showingCandidates: showsCandidatePanel)
+        }
         showsCandidatePanel = visible
         let image = UIImage(systemName: visible ? "chevron.up" : "chevron.down",
                             withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .medium))
         expandCandidates.setImage(image, for: .normal)
-        expandCandidates.accessibilityLabel = visible ? "收起候选字词" : "展开候选字词和拼音设置"
+        expandCandidates.accessibilityLabel = visible ? "收起候选字词" : "展开候选字词"
         if visible {
             updateCandidateGrid()
             candidateGridScroll.setContentOffset(.zero, animated: false)
         }
-        let showContent = {
-            self.rows.isHidden = visible
-            self.candidatePanel.isHidden = !visible
+        let distance = keyArea.bounds.height
+        guard changed, animated, !UIAccessibility.isReduceMotionEnabled, distance > 0 else {
+            finishCandidateTransition(showingCandidates: visible)
+            return
         }
-        if changed, animated, !UIAccessibility.isReduceMotionEnabled {
-            UIView.transition(with: keyArea, duration: 0.20,
-                              options: [.transitionCrossDissolve, .beginFromCurrentState, .allowUserInteraction],
-                              animations: showContent)
-        } else {
-            showContent()
+
+        let incoming: UIView = visible ? candidateGridScroll : rows
+        let outgoing: UIView = visible ? rows : candidateGridScroll
+        let direction: CGFloat = visible ? 1 : -1
+        incoming.transform = CGAffineTransform(translationX: 0, y: direction * distance)
+        incoming.isHidden = false
+        incoming.isUserInteractionEnabled = false
+        outgoing.isUserInteractionEnabled = false
+        outgoing.accessibilityElementsHidden = true
+        let transition = UIViewPropertyAnimator(duration: 0.24, curve: .easeInOut) {
+            outgoing.transform = CGAffineTransform(translationX: 0, y: -direction * distance)
+            incoming.transform = .identity
         }
+        transition.addCompletion { [weak self] _ in
+            self?.candidateTransition = nil
+            self?.finishCandidateTransition(showingCandidates: visible)
+        }
+        candidateTransition = transition
+        transition.startAnimation()
+    }
+
+    private func finishCandidateTransition(showingCandidates: Bool) {
+        rows.isHidden = showingCandidates
+        rows.isUserInteractionEnabled = !showingCandidates
+        rows.accessibilityElementsHidden = showingCandidates
+        rows.transform = .identity
+        candidateGridScroll.isHidden = !showingCandidates
+        candidateGridScroll.isUserInteractionEnabled = showingCandidates
+        candidateGridScroll.accessibilityElementsHidden = !showingCandidates
+        candidateGridScroll.transform = .identity
     }
 
     private func updateCandidateGrid() {
@@ -377,6 +374,8 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func keysForPage() -> [[Key]] {
+        let isPhonetic = alternatePage == nil
+        let isSymbols = page == .symbols
         let modifierWeight: CGFloat = page == .finals ? 1.1 : 1
         let shift = Key("", weight: modifierWeight, image: page == .finals ? "shift.fill" : "shift",
                         label: page == .finals ? "声母页" : "韵母页") { [weak self] in
@@ -384,16 +383,19 @@ final class KeyboardViewController: UIInputViewController {
             self?.updateKeys()
         }
         let backspace = Key("", weight: modifierWeight, image: "delete.left", label: "删除") { [weak self] in self?.delete() }
-        let space = Key(page == .initials || page == .finals ? "注" : "空格",
-                        weight: 4.42, label: "空格或一声") { [weak self] in self?.space() }
+        let space = Key(isPhonetic ? "注" : "空格",
+                        weight: 5.42, label: isPhonetic ? "空格或一声" : "空格") { [weak self] in self?.space() }
         let enter = Key(returnTitle == "换行" ? "" : returnTitle, weight: 2.15,
                         image: returnTitle == "换行" ? "return" : nil,
                         label: returnTitle) { [weak self] in self?.enter() }
-        let numbers = Key(page == .numbers ? "ㄅㄆㄇ" : "123", label: "数字与符号") { [weak self] in
-            self?.toggle(.numbers)
+        let numbers = Key(isPhonetic ? "123" : "ㄅㄆㄇ", label: isPhonetic ? "数字页" : "返回注音") { [weak self] in
+            self?.showAlternatePage(isPhonetic ? .numbers : nil)
         }
-        let emoji = Key("", image: "face.smiling", label: "表情") { [weak self] in self?.toggle(.emoji) }
-        let bottom = [numbers, emoji] + (needsInputModeSwitchKey ? [Key("", image: "globe", label: "切换键盘")] : [])
+        let symbols = Key(isSymbols ? "123" : "#+=", weight: 1.4,
+                          label: isSymbols ? "数字页" : "符号页") { [weak self] in
+            self?.showAlternatePage(isSymbols ? .numbers : .symbols)
+        }
+        let bottom = [numbers] + (needsInputModeSwitchKey ? [Key("", image: "globe", label: "切换键盘")] : [])
             + [space, enter]
 
         switch page {
@@ -420,15 +422,15 @@ final class KeyboardViewController: UIInputViewController {
         case .numbers:
             return [
                 literals("1234567890"),
-                literals("－／：；（）￥＆＠"),
-                literals("，。！？、＂＇…") + [backspace],
+                literals("－／：；（）￥＆＠＂"),
+                [symbols] + literals("，。！？、＇…") + [backspace],
                 bottom
             ]
-        case .emoji:
+        case .symbols:
             return [
-                literals("😀😃😄😁😅😂🙂🙃"),
-                literals("🥹😍🥰😎🤔😭😢😡"),
-                literals("👍👏🙏🎉❤️🔥✨") + [backspace],
+                literals("[]{}#%^*+="),
+                literals("_\\|~<>€£¥•"),
+                [symbols] + literals(".,?!'@/") + [backspace],
                 bottom
             ]
         }
@@ -532,8 +534,8 @@ final class KeyboardViewController: UIInputViewController {
         return row
     }
 
-    private func toggle(_ page: Page) {
-        alternatePage = alternatePage == page ? nil : page
+    private func showAlternatePage(_ page: Page?) {
+        alternatePage = page
         render()
     }
 
@@ -568,7 +570,9 @@ final class KeyboardViewController: UIInputViewController {
 
     private func choose(_ candidate: Candidate) {
         composition.consume(candidate.syllableCount)
-        if !candidate.reading.isEmpty {
+        if candidate.isEmoji {
+            selectedSegments.removeAll()
+        } else if !candidate.reading.isEmpty {
             userDictionary.learn(candidate)
             if composition.hasInput || !selectedSegments.isEmpty {
                 selectedSegments.append(candidate)

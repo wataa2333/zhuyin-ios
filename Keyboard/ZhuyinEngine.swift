@@ -89,10 +89,12 @@ struct Composition {
 struct Candidate {
     let text: String
     let reading: [Syllable]
+    let isEmoji: Bool
 
-    init(text: String, reading: [Syllable] = []) {
+    init(text: String, reading: [Syllable] = [], isEmoji: Bool = false) {
         self.text = text
         self.reading = reading
+        self.isEmoji = isEmoji
     }
 
     init?(text: String, readingCode: Substring) {
