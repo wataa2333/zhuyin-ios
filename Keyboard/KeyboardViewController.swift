@@ -1,3 +1,4 @@
+import AVFAudio
 import UIKit
 
 final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDelegate {
@@ -94,13 +95,16 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     private weak var previewKey: UIButton?
     private var deleteHoldBounds: CGRect?
     private var deleteRepeatTask: Task<Void, Never>?
-    private var playsKeyHaptics = false
-    private lazy var keyHaptic: UIImpactFeedbackGenerator = {
-        if #available(iOS 17.5, *) {
-            return UIImpactFeedbackGenerator(style: .light, view: view)
+    private var feedback = KeyboardPreferences.localFeedback {
+        didSet {
+            if oldValue.haptics != feedback.haptics { keyHaptic = nil }
+            if feedback.volume == 0 { clickPlayers.values.forEach { $0.stop() } }
         }
-        return UIImpactFeedbackGenerator(style: .light)
-    }()
+    }
+    private var canPlayKeyFeedback = false
+    private var keyHaptic: UIImpactFeedbackGenerator?
+    private var clickPlayers: [Bool: AVAudioPlayer] = [:]
+    private var attemptedClickSetup = false
 
     private var page: Page { alternatePage ?? (composition.showsFinals ? .finals : .initials) }
     private func refreshInputTraits(from proxy: UITextDocumentProxy) {
@@ -125,7 +129,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     }
 
     override func loadView() {
-        inputView = KeyboardInputView(frame: .zero, inputViewStyle: .keyboard)
+        inputView = UIInputView(frame: .zero, inputViewStyle: .keyboard)
     }
 
     override func viewDidLoad() {
@@ -208,13 +212,13 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        playsKeyHaptics = hasFullAccess
+        canPlayKeyFeedback = hasFullAccess
         refreshDocument(reloadCandidates: true)
     }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        playsKeyHaptics = hasFullAccess
+        canPlayKeyFeedback = hasFullAccess
         refreshDocument()
         keyboardWarmup?.cancel()
         keyboardWarmup = Task { [weak self] in
@@ -223,20 +227,30 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             try? await Task.sleep(nanoseconds: 250_000_000)
             guard let self, !Task.isCancelled else { return }
             self.prepareLexicon()
-            if self.playsKeyHaptics { self.keyHaptic.prepare() }
+            self.hapticGenerator()?.prepare()
+            self.prepareClickPlayers()
+            self.clickPlayers.values.forEach { _ = $0.prepareToPlay() }
         }
 
         preferenceLoad?.cancel()
-        let reading = Task.detached(priority: .utility) { KeyboardPreferences.showsPinyin }
+        let previousFeedback = feedback
+        let reading = Task.detached(priority: .utility) {
+            (KeyboardPreferences.showsPinyin, KeyboardPreferences.sharedFeedback ?? KeyboardPreferences.localFeedback)
+        }
         preferenceLoad = Task(priority: .utility) { [weak self] in
-            let enabled = await reading.value
-            guard let self, !Task.isCancelled, self.showsPinyin != enabled else { return }
+            let (enabled, feedback) = await reading.value
+            guard let self, !Task.isCancelled else { return }
+            if self.feedback == previousFeedback, self.feedback != feedback {
+                KeyboardPreferences.saveLocally(feedback)
+                self.feedback = feedback
+            }
+            guard self.showsPinyin != enabled else { return }
             KeyboardPreferences.saveLocally(enabled)
             self.showsPinyin = enabled
             self.updateKeys()
         }
         DispatchQueue.main.async { [weak self] in
-            guard let self, self.synchronizePinyinSetting() else { return }
+            guard let self, self.synchronizeSettings() else { return }
             self.updateKeys()
         }
     }
@@ -250,6 +264,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         super.viewDidDisappear(animated)
         keyboardWarmup?.cancel()
         preferenceLoad?.cancel()
+        clickPlayers.values.forEach { $0.stop() }
+        if clickPlayers.isEmpty { attemptedClickSetup = false }
         composition = Composition()
         markedReading = ""
         selectedSegments.removeAll()
@@ -290,7 +306,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
 
     override func selectionDidChange(_ textInput: UITextInput?) {
         super.selectionDidChange(textInput)
-        if isViewLoaded, !updatingDocument, synchronizePinyinSetting() { updateKeys() }
+        if isViewLoaded, !updatingDocument, synchronizeSettings() { updateKeys() }
     }
 
     private nonisolated static func loadLexicon(from url: URL?) -> Lexicon {
@@ -325,7 +341,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             setCandidatePanelVisible(false)
             documentIdentifier = identifier
         }
-        if changed || reloadCandidates { _ = synchronizePinyinSetting() }
+        if changed || reloadCandidates { _ = synchronizeSettings() }
         updateKeys()
         if isSearchField && !composition.hasInput {
             // Keep the toolbar's height, but skip the idle candidate buttons in search fields.
@@ -337,16 +353,21 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     }
 
     @discardableResult
-    private func synchronizePinyinSetting() -> Bool {
+    private func synchronizeSettings() -> Bool {
         guard !composition.hasInput else { return false }
         let proxy = textDocumentProxy
-        guard proxy.textContentType == .nickname, KeyboardPreferences.sharedPinyin == nil else { return false }
+        guard proxy.textContentType == .nickname else { return false }
         let code = (proxy.documentContextBeforeInput ?? "") + (proxy.selectedText ?? "")
             + (proxy.documentContextAfterInput ?? "")
-        guard let enabled = KeyboardPreferences.pinyinSetting(from: code), showsPinyin != enabled else { return false }
+        guard let settings = KeyboardPreferences.syncSettings(from: code) else { return false }
+        if let syncedFeedback = settings.feedback, syncedFeedback != feedback, KeyboardPreferences.sharedFeedback == nil {
+            KeyboardPreferences.saveLocally(syncedFeedback)
+            feedback = syncedFeedback
+        }
+        guard showsPinyin != settings.pinyin, KeyboardPreferences.sharedPinyin == nil else { return false }
         preferenceLoad?.cancel()
-        KeyboardPreferences.saveLocally(enabled)
-        showsPinyin = enabled
+        KeyboardPreferences.saveLocally(settings.pinyin)
+        showsPinyin = settings.pinyin
         return true
     }
 
@@ -814,9 +835,52 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         return button.isDescendant(of: layout)
     }
 
-    private func playKeyFeedback(at location: CGPoint? = nil) {
-        UIDevice.current.playInputClick()
-        if playsKeyHaptics {
+    private func hapticGenerator() -> UIImpactFeedbackGenerator? {
+        guard canPlayKeyFeedback, feedback.haptics > 0 else { return nil }
+        if let keyHaptic { return keyHaptic }
+        let style: UIImpactFeedbackGenerator.FeedbackStyle
+        switch feedback.haptics {
+        case 3: style = .heavy
+        case 2: style = .medium
+        default: style = .light
+        }
+        let generator: UIImpactFeedbackGenerator
+        if #available(iOS 17.5, *) {
+            generator = UIImpactFeedbackGenerator(style: style, view: view)
+        } else {
+            generator = UIImpactFeedbackGenerator(style: style)
+        }
+        keyHaptic = generator
+        return generator
+    }
+
+    private func prepareClickPlayers() {
+        guard canPlayKeyFeedback, feedback.volume > 0, !attemptedClickSetup else { return }
+        attemptedClickSetup = true
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.ambient)
+        } catch {
+            return
+        }
+        let bundle = Bundle(for: KeyboardViewController.self)
+        for (deleting, name) in [(false, "tap"), (true, "delete")] {
+            guard let url = bundle.url(forResource: name, withExtension: "wav", subdirectory: "KeySounds"),
+                  let player = try? AVAudioPlayer(contentsOf: url) else { continue }
+            clickPlayers[deleting] = player
+        }
+    }
+
+    private func playKeyFeedback(at location: CGPoint? = nil, deleting: Bool = false) {
+        guard canPlayKeyFeedback else { return }
+        if feedback.volume > 0 {
+            prepareClickPlayers()
+            if let player = clickPlayers[deleting] {
+                player.volume = Float(feedback.volume) / 100
+                player.currentTime = 0
+                player.play()
+            }
+        }
+        if let keyHaptic = hapticGenerator() {
             if #available(iOS 17.5, *), let location {
                 keyHaptic.impactOccurred(at: location)
             } else {
@@ -828,7 +892,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
 
     private func pressKey(_ sender: KeyboardButton) {
         if !sender.isDeleteKey { stopDeleteHold() }
-        playKeyFeedback(at: sender.convert(CGPoint(x: sender.bounds.midX, y: sender.bounds.midY), to: view))
+        playKeyFeedback(at: sender.convert(CGPoint(x: sender.bounds.midX, y: sender.bounds.midY), to: view),
+                        deleting: sender.isDeleteKey)
         guard let title = sender.previewTitle else { return }
         let key = sender.convert(sender.bounds, to: view)
         let width = max(44, key.width + 12)
@@ -884,7 +949,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
                 while !Task.isCancelled {
                     guard let self, self.composition.hasInput || self.textDocumentProxy.hasText else { return }
                     self.delete()
-                    self.playKeyFeedback(at: location)
+                    self.playKeyFeedback(at: location, deleting: true)
                     repeatCount += 1
                     let interval: UInt64 = repeatCount < 8 ? 75_000_000 : 45_000_000
                     do {
@@ -1013,10 +1078,6 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         commit(text)
         render()
     }
-}
-
-private final class KeyboardInputView: UIInputView, UIInputViewAudioFeedback {
-    var enableInputClicksWhenVisible: Bool { true }
 }
 
 private final class KeyboardKeyRow: UIView {

@@ -14,6 +14,7 @@
 		10A000000000000000000006 /* ZhuyinKeyboard.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 10A000000000000000000018; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		10A000000000000000000007 /* KeyboardPreferences.swift in App Sources */ = {isa = PBXBuildFile; fileRef = 10A000000000000000000019; };
 		10A000000000000000000008 /* KeyboardPreferences.swift in Keyboard Sources */ = {isa = PBXBuildFile; fileRef = 10A000000000000000000019; };
+		10A000000000000000000009 /* KeySounds in Resources */ = {isa = PBXBuildFile; fileRef = 10A00000000000000000001B; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -49,6 +50,7 @@
 		10A000000000000000000018 = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ZhuyinKeyboard.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		10A000000000000000000019 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardPreferences.swift; sourceTree = "<group>"; };
 		10A00000000000000000001A = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Zhuyin.entitlements; sourceTree = "<group>"; };
+		10A00000000000000000001B = {isa = PBXFileReference; lastKnownFileType = folder; path = KeySounds; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -70,7 +72,7 @@
 		};
 		10A000000000000000000043 = {
 			isa = PBXGroup;
-			children = (10A000000000000000000012, 10A000000000000000000013, 10A000000000000000000014, 10A000000000000000000015, 10A000000000000000000016, );
+			children = (10A000000000000000000012, 10A000000000000000000013, 10A000000000000000000014, 10A000000000000000000015, 10A000000000000000000016, 10A00000000000000000001B, );
 			path = Keyboard;
 			sourceTree = "<group>";
 		};
@@ -140,7 +142,7 @@
 
 /* Begin PBXResourcesBuildPhase section */
 		10A000000000000000000033 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
-		10A000000000000000000034 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (10A000000000000000000004, 10A000000000000000000005, ); runOnlyForDeploymentPostprocessing = 0; };
+		10A000000000000000000034 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (10A000000000000000000004, 10A000000000000000000005, 10A000000000000000000009, ); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
