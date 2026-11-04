@@ -70,6 +70,7 @@ final class KeyboardViewController: UIInputViewController {
     private var displayedPinyin = false
     private var keyLayouts: [Page: UIStackView] = [:]
     private var returnTitle = "换行"
+    private var isSearchField = false
     private var keyboardWarmup: Task<Void, Never>?
 
     private let rows = UIView()
@@ -98,8 +99,15 @@ final class KeyboardViewController: UIInputViewController {
     }()
 
     private var page: Page { alternatePage ?? (composition.showsFinals ? .finals : .initials) }
-    private func currentReturnTitle() -> String {
-        switch textDocumentProxy.returnKeyType {
+    private func refreshInputTraits(from proxy: UITextDocumentProxy) {
+        let returnKeyType = proxy.returnKeyType
+        isSearchField = returnKeyType == .search || returnKeyType == .google
+            || returnKeyType == .yahoo || proxy.keyboardType == .webSearch
+        returnTitle = title(for: returnKeyType)
+    }
+
+    private func title(for returnKeyType: UIReturnKeyType?) -> String {
+        switch returnKeyType {
         case .go: return "前往"
         case .search, .google, .yahoo: return "搜索"
         case .send: return "发送"
@@ -189,7 +197,7 @@ final class KeyboardViewController: UIInputViewController {
         setCandidatePanelVisible(false)
 
         configureKeyPreview()
-        returnTitle = currentReturnTitle()
+        refreshInputTraits(from: textDocumentProxy)
         updateKeys()
     }
 
@@ -293,8 +301,10 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func refreshDocument(reloadCandidates: Bool = false) {
-        returnTitle = currentReturnTitle()
-        let identifier = textDocumentProxy.documentIdentifier
+        let proxy = textDocumentProxy
+        let wasSearchField = isSearchField
+        refreshInputTraits(from: proxy)
+        let identifier = proxy.documentIdentifier
         let changed = documentIdentifier != identifier
         if changed {
             composition = Composition()
@@ -306,7 +316,13 @@ final class KeyboardViewController: UIInputViewController {
         }
         if changed || reloadCandidates { _ = synchronizePinyinSetting() }
         updateKeys()
-        if changed || reloadCandidates { scheduleCandidateRefresh() }
+        if isSearchField && !composition.hasInput {
+            // Keep the toolbar's height, but skip the idle candidate buttons in search fields.
+            candidateRefreshPending = false
+            if !candidates.isEmpty { renderCandidates() }
+        } else if changed || reloadCandidates || wasSearchField != isSearchField {
+            scheduleCandidateRefresh()
+        }
     }
 
     @discardableResult
@@ -348,7 +364,7 @@ final class KeyboardViewController: UIInputViewController {
                 }
                 return [word, Candidate(text: emoji, reading: word.reading, isEmoji: true)]
             }
-        } else if alternatePage == nil {
+        } else if alternatePage == nil && !isSearchField {
             candidates = Self.starterCandidates.map { Candidate(text: $0) }
         } else {
             candidates = []

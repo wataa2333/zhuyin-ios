@@ -51,6 +51,15 @@ WORD_READINGS = {
     "喜欢": "xǐ huan", "意思": "yì si", "认识": "rèn shi",
     "明白": "míng bai", "麻烦": "má fan", "舒服": "shū fu",
     "什么意思": "shén me yì si",
+    "有空吗": "yǒu kòng ma", "方便吗": "fāng biàn ma", "你忙吗": "nǐ máng ma",
+    "你吃饭了吗": "nǐ chī fàn le ma", "最近怎么样": "zuì jìn zěn me yàng",
+    "我到了": "wǒ dào le", "我在路上": "wǒ zài lù shang", "我马上到": "wǒ mǎ shàng dào",
+    "等我一下": "děng wǒ yí xià", "先这样": "xiān zhè yàng", "晚点聊": "wǎn diǎn liáo",
+    "回头再说": "huí tóu zài shuō", "发给我": "fā gěi wǒ", "再说一遍": "zài shuō yí biàn",
+    "你说得对": "nǐ shuō de duì", "没关系的": "méi guān xi de", "真的假的": "zhēn de jiǎ de",
+    "我知道了": "wǒ zhī dao le", "知道了": "zhī dao le", "谢谢你": "xiè xie nǐ",
+    "我没听清": "wǒ méi tīng qīng", "你方便的时候": "nǐ fāng biàn de shí hou",
+    "稍等一下": "shāo děng yí xià", "有点问题": "yǒu diǎn wèn tí",
 }
 
 # Readings that only came from assigning each character its first listed tone.
@@ -170,7 +179,9 @@ def build(rime, pinyin_data, opencc, ice, phrase_data):
         key=lambda row: (-row[2], row[0], row[1]),
     )
     rejected = {(text, encode_reading(pinyin)) for text, pinyin in REJECTED_READINGS.items()}
-    added = 0
+    curated = {(text, encode_reading(pinyin)): 1_000_000_000 for text, pinyin in WORD_READINGS.items()}
+    entries.update(curated)
+    added = len(curated)
     for text, pinyin, weight in phrases:
         if not all(c == "〇" or unicodedata.name(c, "").startswith("CJK UNIFIED IDEOGRAPH") for c in text):
             continue
@@ -190,9 +201,6 @@ def build(rime, pinyin_data, opencc, ice, phrase_data):
         if added == PHRASE_LIMIT:
             break
 
-    for text, pinyin in WORD_READINGS.items():
-        reading = encode_reading(pinyin)
-        entries[(text, reading)] = 1_000_000_000
     return entries
 
 
