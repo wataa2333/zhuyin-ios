@@ -9,15 +9,18 @@ final class KeyboardViewController: UIInputViewController {
         let systemImage: String?
         let accessibilityLabel: String?
         let pinyin: String?
+        let activatesOnTouchDown: Bool
         let action: (() -> Void)?
 
         init(_ title: String, weight: CGFloat = 1, image: String? = nil,
-             label: String? = nil, pinyin: String? = nil, action: (() -> Void)? = nil) {
+             label: String? = nil, pinyin: String? = nil, activatesOnTouchDown: Bool = false,
+             action: (() -> Void)? = nil) {
             self.title = title
             self.weight = weight
             systemImage = image
             accessibilityLabel = label
             self.pinyin = pinyin
+            self.activatesOnTouchDown = activatesOnTouchDown
             self.action = action
         }
     }
@@ -75,6 +78,7 @@ final class KeyboardViewController: UIInputViewController {
     private var candidateButtons: [UIButton] = []
     private var displayedCandidates: [String] = []
     private var highlightsFirstCandidate = false
+    private var candidateRefreshPending = false
     private let expandCandidates = CandidateToggleButton(type: .system)
     private let candidateGridScroll = UIScrollView()
     private var candidateGridButtons: [UIButton] = []
@@ -84,11 +88,13 @@ final class KeyboardViewController: UIInputViewController {
     private var candidateGridWidth: CGFloat = 0
     private var portraitKeyAreaHeight: NSLayoutConstraint?
     private let keyPreview = UILabel()
+    private weak var previewKey: UIButton?
+    private var playsKeyHaptics = false
     private lazy var keyHaptic: UIImpactFeedbackGenerator = {
         if #available(iOS 17.5, *) {
-            return UIImpactFeedbackGenerator(style: .soft, view: view)
+            return UIImpactFeedbackGenerator(style: .light, view: view)
         }
-        return UIImpactFeedbackGenerator(style: .soft)
+        return UIImpactFeedbackGenerator(style: .light)
     }()
 
     private var page: Page { alternatePage ?? (composition.showsFinals ? .finals : .initials) }
@@ -107,7 +113,7 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     override func loadView() {
-        view = KeyboardInputView(frame: .zero, inputViewStyle: .keyboard)
+        inputView = KeyboardInputView(frame: .zero, inputViewStyle: .keyboard)
     }
 
     override func viewDidLoad() {
@@ -128,6 +134,9 @@ final class KeyboardViewController: UIInputViewController {
         expandCandidates.configuration = arrowConfiguration
         expandCandidates.addAction(UIAction { [weak self] _ in
             guard let self else { return }
+            if self.candidateRefreshPending { self.renderCandidates() }
+            guard !self.expandCandidates.isHidden else { return }
+            self.playKeyFeedback()
             self.setCandidatePanelVisible(!self.showsCandidatePanel, animated: true)
         }, for: .touchDown)
         let toolbar = UIStackView(arrangedSubviews: [candidateScroll, divider, arrowSlot])
@@ -186,18 +195,22 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        playsKeyHaptics = hasFullAccess
         refreshDocument(reloadCandidates: true)
     }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        playsKeyHaptics = hasFullAccess
         refreshDocument()
         keyboardWarmup?.cancel()
         keyboardWarmup = Task { [weak self] in
+            guard !Task.isCancelled else { return }
+            self?.prepareFinalsPage()
             try? await Task.sleep(nanoseconds: 250_000_000)
             guard let self, !Task.isCancelled else { return }
             self.prepareLexicon()
-            if self.hasFullAccess { self.keyHaptic.prepare() }
+            if self.playsKeyHaptics { self.keyHaptic.prepare() }
         }
 
         preferenceLoad?.cancel()
@@ -224,6 +237,8 @@ final class KeyboardViewController: UIInputViewController {
         selectedSegments.removeAll()
         alternatePage = nil
         keyPreview.isHidden = true
+        previewKey = nil
+        candidateRefreshPending = false
         setCandidatePanelVisible(false)
     }
 
@@ -273,7 +288,7 @@ final class KeyboardViewController: UIInputViewController {
             let loaded = await loading.value
             guard let self, self.lexicon == nil else { return }
             self.lexicon = loaded
-            if self.composition.hasInput { self.render() }
+            if self.composition.hasInput { self.scheduleCandidateRefresh() }
         }
     }
 
@@ -308,6 +323,21 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func render() {
+        updateKeys()
+        renderCandidates()
+    }
+
+    private func scheduleCandidateRefresh() {
+        guard !candidateRefreshPending else { return }
+        candidateRefreshPending = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.candidateRefreshPending else { return }
+            self.renderCandidates()
+        }
+    }
+
+    private func renderCandidates() {
+        candidateRefreshPending = false
         if composition.hasInput {
             let words = lexicon?.candidates(for: composition, learned: userDictionary.candidates()) ?? []
             var shownEmoji: Set<String> = []
@@ -329,7 +359,6 @@ final class KeyboardViewController: UIInputViewController {
             highlightsFirstCandidate = highlight
             updateCandidateBar()
         }
-        updateKeys()
     }
 
     private func updateCandidateBar() {
@@ -392,7 +421,8 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     @objc private func selectCandidate(_ button: UIButton) {
-        guard candidates.indices.contains(button.tag) else { return }
+        guard !candidateRefreshPending, candidates.indices.contains(button.tag) else { return }
+        playKeyFeedback()
         choose(candidates[button.tag])
     }
 
@@ -534,16 +564,31 @@ final class KeyboardViewController: UIInputViewController {
                 }
             }
         }
+        showKeyPage()
+    }
+
+    private func showKeyPage() {
+        let page = self.page
         guard page != displayedPage else { return }
+        let layout = keyLayout(for: page)
         if let displayedPage { keyLayouts[displayedPage]?.isHidden = true }
         displayedPage = page
-        if let cached = keyLayouts[page] {
-            cached.isHidden = false
-            return
-        }
-        let layout = UIStackView(arrangedSubviews: (keysForPage() + [bottomKeys(for: page)]).map(makeRow))
+        layout.isHidden = false
+        if layout.bounds.isEmpty, !rows.bounds.isEmpty { rows.layoutIfNeeded() }
+    }
+
+    private func prepareFinalsPage() {
+        guard keyLayouts[.finals] == nil else { return }
+        _ = keyLayout(for: .finals)
+        if !rows.bounds.isEmpty { rows.layoutIfNeeded() }
+    }
+
+    private func keyLayout(for page: Page) -> UIStackView {
+        if let cached = keyLayouts[page] { return cached }
+        let layout = UIStackView(arrangedSubviews: (keysForPage(page) + [bottomKeys(for: page)]).map(makeRow))
         layout.axis = .vertical
         layout.distribution = .fillEqually
+        layout.isHidden = true
         if #available(iOS 26.0, *) { layout.spacing = Self.portraitKeySpacing } else { layout.spacing = 8 }
         // The host can measure the keyboard before giving it a height.
         // Keep the key rows in the constraint chain so they contribute their intrinsic size.
@@ -556,17 +601,19 @@ final class KeyboardViewController: UIInputViewController {
             layout.bottomAnchor.constraint(equalTo: rows.bottomAnchor)
         ])
         keyLayouts[page] = layout
+        return layout
     }
 
-    private func keysForPage() -> [[Key]] {
+    private func keysForPage(_ page: Page) -> [[Key]] {
         let isSymbols = page == .symbols
         let modifierWeight: CGFloat = page == .finals ? 1.1 : 1
         let shift = Key("", weight: modifierWeight, image: page == .finals ? "shift.fill" : "shift",
-                        label: page == .finals ? "声母页" : "韵母页") { [weak self] in
+                        label: page == .finals ? "声母页" : "韵母页", activatesOnTouchDown: true) { [weak self] in
             self?.composition.togglePage()
-            self?.updateKeys()
+            self?.showKeyPage()
         }
-        let backspace = Key("", weight: modifierWeight, image: "delete.left", label: "删除") { [weak self] in self?.delete() }
+        let backspace = Key("", weight: modifierWeight, image: "delete.left", label: "删除",
+                            activatesOnTouchDown: true) { [weak self] in self?.delete() }
         let symbols = Key(isSymbols ? "123" : "#+=", weight: 1.4,
                           label: isSymbols ? "数字页" : "符号页") { [weak self] in
             self?.showAlternatePage(isSymbols ? .numbers : .symbols)
@@ -580,7 +627,7 @@ final class KeyboardViewController: UIInputViewController {
             ]
         case .finals:
             let tones = zip("ˊˇˋ˙", "2345").map { symbol, tone in
-                Key(String(symbol), weight: 1.55, label: "声调 \(tone)") { [weak self] in
+                Key(String(symbol), weight: 1.55, label: "声调 \(tone)", activatesOnTouchDown: true) { [weak self] in
                     self?.composition.finish(tone: tone)
                     self?.updateComposition()
                 }
@@ -611,7 +658,8 @@ final class KeyboardViewController: UIInputViewController {
             self?.showAlternatePage(isPhonetic ? .numbers : nil)
         }
         let space = Key(isPhonetic ? "注" : "空格",
-                        weight: 5.42, label: isPhonetic ? "空格或一声" : "空格") { [weak self] in self?.space() }
+                        weight: 5.42, label: isPhonetic ? "空格或一声" : "空格",
+                        activatesOnTouchDown: isPhonetic) { [weak self] in self?.space() }
         let enter = Key(returnTitle == "换行" ? "" : returnTitle, weight: 2.15,
                         image: returnTitle == "换行" ? "return" : nil,
                         label: returnTitle) { [weak self] in self?.enter() }
@@ -621,7 +669,7 @@ final class KeyboardViewController: UIInputViewController {
 
     private func phonetics(_ symbols: String) -> [Key] {
         symbols.map { symbol in
-            Key(String(symbol), pinyin: Self.pinyinBySymbol[symbol]) { [weak self] in
+            Key(String(symbol), pinyin: Self.pinyinBySymbol[symbol], activatesOnTouchDown: true) { [weak self] in
                 self?.composition.type(symbol)
                 self?.updateComposition()
             }
@@ -696,11 +744,21 @@ final class KeyboardViewController: UIInputViewController {
                        key.pinyin != nil || key.accessibilityLabel == nil || "ˊˇˋ˙".contains(key.title) {
                         button.previewTitle = key.title
                     }
-                    button.addTarget(self, action: #selector(pressKey(_:)), for: .touchDown)
-                    button.addTarget(self, action: #selector(hideKeyPreview), for: [
+                    button.activatesOnTouchDown = key.activatesOnTouchDown
+                    button.addAction(UIAction { [weak self, weak button] _ in
+                        guard let self, let button, self.isOnDisplayedPage(button) else { return }
+                        self.pressKey(button)
+                        if key.activatesOnTouchDown { action() }
+                    }, for: .touchDown)
+                    button.addTarget(self, action: #selector(hideKeyPreview(_:)), for: [
                         .touchUpInside, .touchUpOutside, .touchDragExit, .touchCancel
                     ])
-                    button.addAction(UIAction { _ in action() }, for: .touchUpInside)
+                    if !key.activatesOnTouchDown {
+                        button.addAction(UIAction { [weak self, weak button] _ in
+                            guard let self, let button, self.isOnDisplayedPage(button) else { return }
+                            action()
+                        }, for: .touchUpInside)
+                    }
                 } else {
                     button.addTarget(self, action: #selector(handleInputModeList(from:with:)), for: .allTouchEvents)
                 }
@@ -729,23 +787,35 @@ final class KeyboardViewController: UIInputViewController {
         view.addSubview(keyPreview)
     }
 
-    @objc private func pressKey(_ sender: UIButton) {
+    private func isOnDisplayedPage(_ button: UIButton) -> Bool {
+        guard let displayedPage, let layout = keyLayouts[displayedPage] else { return false }
+        return button.isDescendant(of: layout)
+    }
+
+    private func playKeyFeedback() {
         UIDevice.current.playInputClick()
-        if hasFullAccess {
+        if playsKeyHaptics {
             keyHaptic.impactOccurred()
             keyHaptic.prepare()
         }
-        guard let title = (sender as? KeyboardButton)?.previewTitle else { return }
+    }
+
+    private func pressKey(_ sender: KeyboardButton) {
+        playKeyFeedback()
+        guard let title = sender.previewTitle else { return }
         let key = sender.convert(sender.bounds, to: view)
         let width = max(44, key.width + 12)
         let x = min(max(2, key.midX - width / 2), view.bounds.width - width - 2)
         keyPreview.frame = CGRect(x: x, y: max(0, key.minY - 39), width: width, height: 42)
         keyPreview.text = title
         keyPreview.isHidden = false
+        previewKey = sender
     }
 
-    @objc private func hideKeyPreview() {
+    @objc private func hideKeyPreview(_ sender: UIButton) {
+        guard previewKey === sender else { return }
         keyPreview.isHidden = true
+        previewKey = nil
     }
 
     private func showAlternatePage(_ page: Page?) {
@@ -810,13 +880,14 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func updateComposition() {
+        showKeyPage()
         if composition.hasInput { prepareLexicon() }
         let reading = composition.display
         if markedReading != reading {
             markedReading = reading
             setMarkedText(reading, keepMarked: !reading.isEmpty)
         }
-        render()
+        scheduleCandidateRefresh()
     }
 
     private func setMarkedText(_ text: String, keepMarked: Bool) {
@@ -872,8 +943,16 @@ private final class CandidateToggleButton: UIButton {
 private final class KeyboardButton: UIButton {
     var previewTitle: String?
     var pinyin: String?
+    var activatesOnTouchDown = false
     private var pinyinCaption: UILabel?
     private var shadowBounds: CGRect?
+
+    override func accessibilityActivate() -> Bool {
+        guard activatesOnTouchDown else { return super.accessibilityActivate() }
+        sendActions(for: .touchDown)
+        sendActions(for: .touchUpInside)
+        return true
+    }
 
     func setPinyinVisible(_ visible: Bool) {
         guard let pinyin, let title = title(for: .normal) else { return }

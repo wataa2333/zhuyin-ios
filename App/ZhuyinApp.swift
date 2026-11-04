@@ -22,7 +22,7 @@ private struct SetupView: View {
                     Text("2. 选择「简体注音」。在输入时长按地球键切换到它。")
                     Text("字词查询在设备上运行，无需开启「允许完全访问」。")
                         .foregroundStyle(.secondary)
-                    Text("要使用按键轻触反馈，可在「设置 → 通用 → 键盘 → 键盘 → 简体注音」开启「允许完全访问」。")
+                    Text("使用按键声和轻触反馈时，请在「设置 → 通用 → 键盘 → 键盘 → 简体注音」开启「允许完全访问」。按键声还需在「声音与触感 → 键盘反馈」中开启。")
                         .foregroundStyle(.secondary)
                 }
 
