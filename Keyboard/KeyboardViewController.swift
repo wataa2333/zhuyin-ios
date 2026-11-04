@@ -1,7 +1,7 @@
 import UIKit
 
 final class KeyboardViewController: UIInputViewController {
-    private enum Page: Equatable { case initials, finals, numbers, symbols }
+    private enum Page: Hashable { case initials, finals, numbers, symbols }
 
     private struct Key {
         let title: String
@@ -43,32 +43,30 @@ final class KeyboardViewController: UIInputViewController {
     private var updatingDocument = false
     private var userDictionary = UserDictionary()
     private var selectedSegments: [Candidate] = []
-    private lazy var lexicon: Lexicon = {
-        guard let url = Bundle(for: KeyboardViewController.self).url(forResource: "Lexicon", withExtension: "tsv"),
-              let contents = try? String(contentsOf: url, encoding: .utf8) else {
-            assertionFailure("Missing bundled lexicon")
-            return Lexicon(contents: "")
-        }
-        return Lexicon(contents: contents)
-    }()
+    private let lexiconURL = Bundle(for: KeyboardViewController.self).url(forResource: "Lexicon", withExtension: "tsv")
+    private var lexicon: Lexicon?
     private var alternatePage: Page?
     private var documentIdentifier: UUID?
     private var candidates: [Candidate] = []
     private var displayedPage: Page?
     private var displayedGlobe = false
     private var displayedReturn = ""
+    private var displayedPinyin = false
+    private var keyLayouts: [Page: UIStackView] = [:]
 
-    private let rows = UIStackView()
+    private let rows = UIView()
     private let keyArea = UIView()
     private let candidateScroll = UIScrollView()
     private let candidateRow = UIStackView()
+    private var candidateButtons: [UIButton] = []
     private let expandCandidates = UIButton(type: .system)
     private let candidateGridScroll = UIScrollView()
     private let candidateGrid = UIStackView()
     private var showsCandidatePanel = false
     private var candidateTransition: UIViewPropertyAnimator?
     private var candidateGridWidth: CGFloat = 0
-    private var keyboardHeight: NSLayoutConstraint?
+    private let keyPreview = UILabel()
+    private let keyHaptic = UISelectionFeedbackGenerator()
 
     private var page: Page { alternatePage ?? (composition.showsFinals ? .finals : .initials) }
     private var returnTitle: String {
@@ -86,18 +84,11 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     override func loadView() {
-        let keyboard = UIInputView(frame: .zero, inputViewStyle: .keyboard)
-        keyboard.isOpaque = false
-        keyboard.backgroundColor = .clear
-        view = keyboard
+        view = KeyboardInputView(frame: .zero, inputViewStyle: .keyboard)
     }
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        rows.axis = .vertical
-        rows.distribution = .fillEqually
-        rows.spacing = 8
-        if #available(iOS 26.0, *) { rows.spacing = 11 }
         candidateRow.spacing = 3
         candidateScroll.showsHorizontalScrollIndicator = false
         candidateScroll.addSubview(candidateRow)
@@ -115,13 +106,14 @@ final class KeyboardViewController: UIInputViewController {
         divider.widthAnchor.constraint(equalToConstant: 1 / 3).isActive = true
         expandCandidates.tintColor = .label
         expandCandidates.widthAnchor.constraint(equalToConstant: 36).isActive = true
+        expandCandidates.addTarget(self, action: #selector(pressKey(_:)), for: .touchDown)
         expandCandidates.addAction(UIAction { [weak self] _ in
             guard let self else { return }
             self.setCandidatePanelVisible(!self.showsCandidatePanel, animated: true)
         }, for: .touchUpInside)
         let toolbar = UIStackView(arrangedSubviews: [candidateScroll, divider, expandCandidates])
         toolbar.spacing = 3
-        toolbar.heightAnchor.constraint(equalToConstant: 38).isActive = true
+        toolbar.heightAnchor.constraint(equalToConstant: 32).isActive = true
         configureCandidatePanel()
         keyArea.clipsToBounds = true
         for content in [rows, candidateGridScroll] {
@@ -138,7 +130,7 @@ final class KeyboardViewController: UIInputViewController {
 
         let layout = UIStackView(arrangedSubviews: [toolbar, keyArea])
         layout.axis = .vertical
-        layout.spacing = 7
+        layout.spacing = 5
         layout.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(layout)
         let area = view.safeAreaLayoutGuide
@@ -146,25 +138,28 @@ final class KeyboardViewController: UIInputViewController {
         NSLayoutConstraint.activate([
             layout.leadingAnchor.constraint(equalTo: area.leadingAnchor, constant: sideInset),
             layout.trailingAnchor.constraint(equalTo: area.trailingAnchor, constant: -sideInset),
-            layout.topAnchor.constraint(equalTo: area.topAnchor, constant: 8),
+            layout.topAnchor.constraint(equalTo: area.topAnchor, constant: 4),
             layout.bottomAnchor.constraint(equalTo: area.bottomAnchor, constant: -6)
         ])
 
-        let height = view.heightAnchor.constraint(equalToConstant: preferredHeight)
-        height.priority = .defaultHigh
-        height.isActive = true
-        keyboardHeight = height
+        configureKeyPreview()
+        let url = lexiconURL
+        let loading = Task.detached(priority: .userInitiated) { Self.loadLexicon(from: url) }
+        Task { [weak self] in
+            let loaded = await loading.value
+            guard let self, self.lexicon == nil else { return }
+            self.lexicon = loaded
+            if self.composition.hasInput { self.render() }
+        }
         render()
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         let updatedPinyin = KeyboardPreferences.showsPinyin
-        if showsPinyin != updatedPinyin {
-            showsPinyin = updatedPinyin
-            displayedPage = nil
-        }
-        refreshDocument()
+        showsPinyin = updatedPinyin
+        if hasFullAccess { keyHaptic.prepare() }
+        refreshDocument(reloadCandidates: true)
     }
 
     override func viewDidDisappear(_ animated: Bool) {
@@ -173,12 +168,12 @@ final class KeyboardViewController: UIInputViewController {
         markedReading = ""
         selectedSegments.removeAll()
         alternatePage = nil
+        keyPreview.isHidden = true
         setCandidatePanelVisible(false)
     }
 
     override func viewWillLayoutSubviews() {
         super.viewWillLayoutSubviews()
-        keyboardHeight?.constant = preferredHeight
         updateKeys()
     }
 
@@ -194,18 +189,15 @@ final class KeyboardViewController: UIInputViewController {
         if isViewLoaded, !updatingDocument { refreshDocument() }
     }
 
-    private var preferredHeight: CGFloat {
-        traitCollection.verticalSizeClass == .compact ? 198 : 264
+    private nonisolated static func loadLexicon(from url: URL?) -> Lexicon {
+        let contents = url.flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? ""
+        return Lexicon(contents: contents)
     }
 
-    private func refreshDocument() {
-        switch textDocumentProxy.keyboardAppearance {
-        case .dark: view.overrideUserInterfaceStyle = .dark
-        case .light: view.overrideUserInterfaceStyle = .light
-        default: view.overrideUserInterfaceStyle = .unspecified
-        }
+    private func refreshDocument(reloadCandidates: Bool = false) {
         let identifier = textDocumentProxy.documentIdentifier
-        if documentIdentifier != identifier {
+        let changed = documentIdentifier != identifier
+        if changed {
             composition = Composition()
             markedReading = ""
             selectedSegments.removeAll()
@@ -213,12 +205,12 @@ final class KeyboardViewController: UIInputViewController {
             setCandidatePanelVisible(false)
             documentIdentifier = identifier
         }
-        render()
+        if changed || reloadCandidates { render() } else { updateKeys() }
     }
 
     private func render() {
         if composition.hasInput {
-            let words = lexicon.candidates(for: composition, learned: userDictionary.candidates)
+            let words = lexicon?.candidates(for: composition, learned: userDictionary.candidates()) ?? []
             var shownEmoji: Set<String> = []
             candidates = words.flatMap { word -> [Candidate] in
                 guard let emoji = Self.emojiByWord[word.text], shownEmoji.insert(emoji).inserted else {
@@ -231,22 +223,30 @@ final class KeyboardViewController: UIInputViewController {
         } else {
             candidates = []
         }
-        candidateRow.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        candidateScroll.setContentOffset(.zero, animated: false)
-
-        for (index, candidate) in candidates.enumerated() {
-            let button = candidateButton(candidate, highlighted: index == 0 && composition.hasInput)
-            button.setContentCompressionResistancePriority(.required, for: .horizontal)
+        while candidateButtons.count < candidates.count {
+            let button = candidateButton()
+            button.tag = candidateButtons.count
+            button.setContentCompressionResistancePriority(UILayoutPriority(999), for: .horizontal)
+            button.addTarget(self, action: #selector(selectCandidate(_:)), for: .touchUpInside)
+            candidateButtons.append(button)
             candidateRow.addArrangedSubview(button)
         }
+        for (index, button) in candidateButtons.enumerated() {
+            button.isHidden = index >= candidates.count
+            guard !button.isHidden, var configuration = button.configuration else { continue }
+            configuration.title = candidates[index].text
+            configuration.background.backgroundColor = index == 0 && composition.hasInput
+                ? .secondarySystemGroupedBackground : .clear
+            button.configuration = configuration
+        }
+        if candidateScroll.contentOffset != .zero { candidateScroll.setContentOffset(.zero, animated: false) }
         if showsCandidatePanel { updateCandidateGrid() }
         updateKeys()
     }
 
-    private func candidateButton(_ candidate: Candidate, highlighted: Bool = false) -> UIButton {
+    private func candidateButton() -> UIButton {
         let button = UIButton(type: .system)
         var configuration = UIButton.Configuration.plain()
-        configuration.title = candidate.text
         configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
             var attributes = attributes
             attributes.font = .systemFont(ofSize: 18)
@@ -254,11 +254,15 @@ final class KeyboardViewController: UIInputViewController {
         }
         configuration.baseForegroundColor = .label
         configuration.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 9, bottom: 0, trailing: 9)
-        if highlighted { configuration.background.backgroundColor = .secondarySystemGroupedBackground }
         button.configuration = configuration
         button.titleLabel?.lineBreakMode = .byTruncatingTail
-        button.addAction(UIAction { [weak self] _ in self?.choose(candidate) }, for: .touchUpInside)
+        button.addTarget(self, action: #selector(pressKey(_:)), for: .touchDown)
         return button
+    }
+
+    @objc private func selectCandidate(_ button: UIButton) {
+        guard candidates.indices.contains(button.tag) else { return }
+        choose(candidates[button.tag])
     }
 
     private func configureCandidatePanel() {
@@ -293,23 +297,26 @@ final class KeyboardViewController: UIInputViewController {
             updateCandidateGrid()
             candidateGridScroll.setContentOffset(.zero, animated: false)
         }
-        let distance = keyArea.bounds.height
-        guard changed, animated, !UIAccessibility.isReduceMotionEnabled, distance > 0 else {
+        guard changed, animated, !UIAccessibility.isReduceMotionEnabled, keyArea.bounds.height > 0 else {
             finishCandidateTransition(showingCandidates: visible)
             return
         }
 
         let incoming: UIView = visible ? candidateGridScroll : rows
         let outgoing: UIView = visible ? rows : candidateGridScroll
-        let direction: CGFloat = visible ? 1 : -1
+        let direction: CGFloat = visible ? -1 : 1
+        let distance: CGFloat = 22
         incoming.transform = CGAffineTransform(translationX: 0, y: direction * distance)
+        incoming.alpha = 0
         incoming.isHidden = false
         incoming.isUserInteractionEnabled = false
         outgoing.isUserInteractionEnabled = false
         outgoing.accessibilityElementsHidden = true
-        let transition = UIViewPropertyAnimator(duration: 0.24, curve: .easeInOut) {
+        let transition = UIViewPropertyAnimator(duration: 0.20, curve: .easeInOut) {
             outgoing.transform = CGAffineTransform(translationX: 0, y: -direction * distance)
+            outgoing.alpha = 0
             incoming.transform = .identity
+            incoming.alpha = 1
         }
         transition.addCompletion { [weak self] _ in
             self?.candidateTransition = nil
@@ -324,10 +331,12 @@ final class KeyboardViewController: UIInputViewController {
         rows.isUserInteractionEnabled = !showingCandidates
         rows.accessibilityElementsHidden = showingCandidates
         rows.transform = .identity
+        rows.alpha = 1
         candidateGridScroll.isHidden = !showingCandidates
         candidateGridScroll.isUserInteractionEnabled = showingCandidates
         candidateGridScroll.accessibilityElementsHidden = !showingCandidates
         candidateGridScroll.transform = .identity
+        candidateGridScroll.alpha = 1
     }
 
     private func updateCandidateGrid() {
@@ -339,8 +348,13 @@ final class KeyboardViewController: UIInputViewController {
         var row = UIStackView()
         var occupied: CGFloat = 0
 
-        for candidate in candidates {
-            let button = candidateButton(candidate)
+        for (index, candidate) in candidates.enumerated() {
+            let button = candidateButton()
+            var configuration = button.configuration
+            configuration?.title = candidate.text
+            button.configuration = configuration
+            button.tag = index
+            button.addTarget(self, action: #selector(selectCandidate(_:)), for: .touchUpInside)
             let width = min(availableWidth, max(44, ceil(button.intrinsicContentSize.width)))
             if occupied > 0, occupied + spacing + width > availableWidth {
                 appendCandidateRow(row)
@@ -365,12 +379,34 @@ final class KeyboardViewController: UIInputViewController {
     private func updateKeys() {
         let globe = needsInputModeSwitchKey
         let returnKey = returnTitle
-        guard page != displayedPage || globe != displayedGlobe || returnKey != displayedReturn else { return }
+        if globe != displayedGlobe || returnKey != displayedReturn || showsPinyin != displayedPinyin {
+            keyLayouts.values.forEach { $0.removeFromSuperview() }
+            keyLayouts.removeAll()
+            displayedPage = nil
+            displayedGlobe = globe
+            displayedReturn = returnKey
+            displayedPinyin = showsPinyin
+        }
+        guard page != displayedPage else { return }
+        if let displayedPage { keyLayouts[displayedPage]?.isHidden = true }
         displayedPage = page
-        displayedGlobe = globe
-        displayedReturn = returnKey
-        rows.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        for keys in keysForPage() { rows.addArrangedSubview(makeRow(keys)) }
+        if let cached = keyLayouts[page] {
+            cached.isHidden = false
+            return
+        }
+        let layout = UIStackView(arrangedSubviews: keysForPage().map(makeRow))
+        layout.axis = .vertical
+        layout.distribution = .fillEqually
+        if #available(iOS 26.0, *) { layout.spacing = 11 } else { layout.spacing = 8 }
+        layout.translatesAutoresizingMaskIntoConstraints = false
+        rows.addSubview(layout)
+        NSLayoutConstraint.activate([
+            layout.leadingAnchor.constraint(equalTo: rows.leadingAnchor),
+            layout.trailingAnchor.constraint(equalTo: rows.trailingAnchor),
+            layout.topAnchor.constraint(equalTo: rows.topAnchor),
+            layout.bottomAnchor.constraint(equalTo: rows.bottomAnchor)
+        ])
+        keyLayouts[page] = layout
     }
 
     private func keysForPage() -> [[Key]] {
@@ -518,6 +554,14 @@ final class KeyboardViewController: UIInputViewController {
                     button.titleLabel?.minimumScaleFactor = 0.65
                 }
                 if let action = key.action {
+                    if !key.title.isEmpty,
+                       key.pinyin != nil || key.accessibilityLabel == nil || "ˊˇˋ˙".contains(key.title) {
+                        button.previewTitle = key.title
+                    }
+                    button.addTarget(self, action: #selector(pressKey(_:)), for: .touchDown)
+                    button.addTarget(self, action: #selector(hideKeyPreview), for: [
+                        .touchUpInside, .touchUpOutside, .touchDragExit, .touchCancel
+                    ])
                     button.addAction(UIAction { _ in action() }, for: .touchUpInside)
                 } else {
                     button.addTarget(self, action: #selector(handleInputModeList(from:with:)), for: .allTouchEvents)
@@ -532,6 +576,38 @@ final class KeyboardViewController: UIInputViewController {
             }
         }
         return row
+    }
+
+    private func configureKeyPreview() {
+        keyPreview.isHidden = true
+        keyPreview.isUserInteractionEnabled = false
+        keyPreview.isAccessibilityElement = false
+        keyPreview.textAlignment = .center
+        keyPreview.textColor = .label
+        keyPreview.backgroundColor = .secondarySystemGroupedBackground
+        keyPreview.font = .systemFont(ofSize: 30)
+        keyPreview.layer.cornerRadius = 9
+        keyPreview.clipsToBounds = true
+        view.addSubview(keyPreview)
+    }
+
+    @objc private func pressKey(_ sender: UIButton) {
+        UIDevice.current.playInputClick()
+        if hasFullAccess {
+            keyHaptic.selectionChanged()
+            keyHaptic.prepare()
+        }
+        guard let title = (sender as? KeyboardButton)?.previewTitle else { return }
+        let key = sender.convert(sender.bounds, to: view)
+        let width = max(44, key.width + 12)
+        let x = min(max(2, key.midX - width / 2), view.bounds.width - width - 2)
+        keyPreview.frame = CGRect(x: x, y: max(0, key.minY - 39), width: width, height: 42)
+        keyPreview.text = title
+        keyPreview.isHidden = false
+    }
+
+    @objc private func hideKeyPreview() {
+        keyPreview.isHidden = true
     }
 
     private func showAlternatePage(_ page: Page?) {
@@ -569,6 +645,14 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func choose(_ candidate: Candidate) {
+        consumeSelection(candidate)
+        if !candidate.isEmoji, !candidate.reading.isEmpty { userDictionary.save() }
+        setCandidatePanelVisible(false, animated: true)
+        commit(candidate.text)
+        updateComposition()
+    }
+
+    private func consumeSelection(_ candidate: Candidate) {
         composition.consume(candidate.syllableCount)
         if candidate.isEmoji {
             selectedSegments.removeAll()
@@ -585,9 +669,6 @@ final class KeyboardViewController: UIInputViewController {
                 }
             }
         }
-        setCandidatePanelVisible(false, animated: true)
-        commit(candidate.text)
-        updateComposition()
     }
 
     private func updateComposition() {
@@ -617,21 +698,34 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func commitPending() {
-        // A candidate may cover just the first word. Preserve and resolve the rest.
-        while let candidate = candidates.first, composition.hasInput {
-            choose(candidate)
+        guard composition.hasInput else { return }
+        if lexicon == nil { lexicon = Self.loadLexicon(from: lexiconURL) }
+        var text = ""
+        // Resolve any remaining syllables before writing to the host field.
+        while composition.hasInput,
+              let candidate = lexicon?.candidates(for: composition, learned: userDictionary.candidates()).first {
+            text += candidate.text
+            consumeSelection(candidate)
         }
+        if !text.isEmpty { userDictionary.save() }
         if composition.hasInput {
-            let reading = composition.display
+            text += composition.display
             composition = Composition()
             selectedSegments.removeAll()
-            commit(reading)
-            render()
         }
+        setCandidatePanelVisible(false, animated: true)
+        commit(text)
+        render()
     }
 }
 
+private final class KeyboardInputView: UIInputView, UIInputViewAudioFeedback {
+    var enableInputClicksWhenVisible: Bool { true }
+}
+
 private final class KeyboardButton: UIButton {
+    var previewTitle: String?
+
     override var isHighlighted: Bool {
         didSet { alpha = isHighlighted ? 0.62 : 1 }
     }

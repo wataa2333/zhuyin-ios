@@ -21,13 +21,15 @@ private struct SetupView: View {
                     Text("2. 选择「简体注音」。在输入时长按地球键切换到它。")
                     Text("字词查询在设备上运行，无需开启「允许完全访问」。")
                         .foregroundStyle(.secondary)
+                    Text("要使用按键轻触反馈，可在「设置 → 通用 → 键盘 → 键盘 → 简体注音」开启「允许完全访问」。")
+                        .foregroundStyle(.secondary)
                 }
 
                 Section("键盘设置") {
                     Toggle("按键显示拼音", isOn: Binding(get: { showsPinyin }, set: setPinyin))
                         .disabled(KeyboardPreferences.pinyinFile == nil)
                     if KeyboardPreferences.pinyinFile == nil || savingFailed {
-                        Text("无法访问键盘设置。请确认 App 和键盘扩展的签名都包含共享容器权限。")
+                        Text("当前安装无法访问共享容器。请用包含同一 App Group 的描述文件签名 App 和键盘扩展。")
                             .foregroundStyle(.secondary)
                     }
                 }
