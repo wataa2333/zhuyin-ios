@@ -18,7 +18,7 @@ Apple 的公开接口让扩展自行绘制键盘并通过文本代理上屏。�
 - `ios-device-signed` 生成可安装到已登记设备的 Ad Hoc IPA。在 Codemagic 的 Code signing identities 中配置 Apple Distribution 证书，以及 `com.wataa2333.zhuyin` 和 `com.wataa2333.zhuyin.keyboard` 各自的 Ad Hoc 描述文件。两个描述文件都需包含目标 iPhone。
 - `ios-simulator` 生成 `Zhuyin-Simulator.zip`。解压后可把 `Zhuyin.app` 拖入运行中的 iPhone 模拟器。
 
-真机签名时，两个 Bundle ID 都需加入 `group.com.wataa2333.zhuyin`，并使用包含该 App Group 的描述文件和签名权限。自行签名也需保留这个权限，App 内的拼音开关才可传给键盘扩展。
+真机签名时，App 和键盘扩展可加入 `group.com.wataa2333.zhuyin`，用于自动同步拼音设置。如果自行签名的安装包缺少共享容器权限，在 App 内切换拼音开关后，点「打开键盘同步拼音设置」，再切到「简体注音」键盘。设置会保存在键盘本地。
 
 ## 试打
 

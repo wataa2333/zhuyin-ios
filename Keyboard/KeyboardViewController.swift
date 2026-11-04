@@ -156,10 +156,13 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        let updatedPinyin = KeyboardPreferences.showsPinyin
-        showsPinyin = updatedPinyin
+        showsPinyin = KeyboardPreferences.showsPinyin
         if hasFullAccess { keyHaptic.prepare() }
         refreshDocument(reloadCandidates: true)
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.synchronizePinyinSetting() else { return }
+            self.updateKeys()
+        }
     }
 
     override func viewDidDisappear(_ animated: Bool) {
@@ -189,6 +192,11 @@ final class KeyboardViewController: UIInputViewController {
         if isViewLoaded, !updatingDocument { refreshDocument() }
     }
 
+    override func selectionDidChange(_ textInput: UITextInput?) {
+        super.selectionDidChange(textInput)
+        if isViewLoaded, !updatingDocument, synchronizePinyinSetting() { updateKeys() }
+    }
+
     private nonisolated static func loadLexicon(from url: URL?) -> Lexicon {
         let contents = url.flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? ""
         return Lexicon(contents: contents)
@@ -205,7 +213,21 @@ final class KeyboardViewController: UIInputViewController {
             setCandidatePanelVisible(false)
             documentIdentifier = identifier
         }
+        if changed || reloadCandidates { _ = synchronizePinyinSetting() }
         if changed || reloadCandidates { render() } else { updateKeys() }
+    }
+
+    @discardableResult
+    private func synchronizePinyinSetting() -> Bool {
+        guard !composition.hasInput else { return false }
+        let proxy = textDocumentProxy
+        guard proxy.textContentType == .nickname, KeyboardPreferences.sharedPinyin == nil else { return false }
+        let code = (proxy.documentContextBeforeInput ?? "") + (proxy.selectedText ?? "")
+            + (proxy.documentContextAfterInput ?? "")
+        guard let enabled = KeyboardPreferences.pinyinSetting(from: code), showsPinyin != enabled else { return false }
+        KeyboardPreferences.saveLocally(enabled)
+        showsPinyin = enabled
+        return true
     }
 
     private func render() {

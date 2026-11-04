@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 @main
 struct ZhuyinApp: App {
@@ -10,7 +11,7 @@ struct ZhuyinApp: App {
 private struct SetupView: View {
     @State private var text = ""
     @State private var showsPinyin = KeyboardPreferences.showsPinyin
-    @State private var savingFailed = false
+    @State private var needsKeyboardSync = KeyboardPreferences.pinyinFile == nil
     @FocusState private var isTyping: Bool
 
     var body: some View {
@@ -27,9 +28,16 @@ private struct SetupView: View {
 
                 Section("键盘设置") {
                     Toggle("按键显示拼音", isOn: Binding(get: { showsPinyin }, set: setPinyin))
-                        .disabled(KeyboardPreferences.pinyinFile == nil)
-                    if KeyboardPreferences.pinyinFile == nil || savingFailed {
-                        Text("当前安装无法访问共享容器。请用包含同一 App Group 的描述文件签名 App 和键盘扩展。")
+                    if needsKeyboardSync {
+                        PinyinSyncField(code: KeyboardPreferences.syncCode(for: showsPinyin))
+                            .frame(minHeight: 40)
+                            .overlay(alignment: .leading) {
+                                Label("打开键盘同步拼音设置", systemImage: "keyboard")
+                                    .foregroundStyle(Color.accentColor)
+                                    .allowsHitTesting(false)
+                                    .accessibilityHidden(true)
+                            }
+                        Text("更改后点上面的同步栏，并切到「简体注音」键盘。")
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -53,14 +61,50 @@ private struct SetupView: View {
     }
 
     private func setPinyin(_ enabled: Bool) {
-        guard let file = KeyboardPreferences.pinyinFile else { return }
-        do {
-            try Data([enabled ? 1 : 0]).write(to: file, options: .atomic)
-            showsPinyin = enabled
-            savingFailed = false
-            isTyping = false
-        } catch {
-            savingFailed = true
+        KeyboardPreferences.saveLocally(enabled)
+        showsPinyin = enabled
+        isTyping = false
+        guard let file = KeyboardPreferences.pinyinFile else {
+            needsKeyboardSync = true
+            return
+        }
+        let saved: Void? = try? Data([enabled ? 1 : 0]).write(to: file, options: .atomic)
+        needsKeyboardSync = saved == nil
+    }
+}
+
+private struct PinyinSyncField: UIViewRepresentable {
+    let code: String
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeUIView(context: Context) -> UITextField {
+        let field = UITextField()
+        field.textColor = .clear
+        field.tintColor = .clear
+        field.textContentType = .nickname
+        field.autocorrectionType = .no
+        field.spellCheckingType = .no
+        field.accessibilityLabel = "打开键盘同步拼音设置"
+        field.delegate = context.coordinator
+        return field
+    }
+
+    func updateUIView(_ field: UITextField, context: Context) {
+        guard field.text != code else { return }
+        if field.isFirstResponder { field.resignFirstResponder() }
+        field.text = code
+    }
+
+    final class Coordinator: NSObject, UITextFieldDelegate {
+        func textFieldDidBeginEditing(_ textField: UITextField) {
+            let end = textField.endOfDocument
+            textField.selectedTextRange = textField.textRange(from: end, to: end)
+        }
+
+        func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange,
+                       replacementString string: String) -> Bool {
+            false
         }
     }
 }
