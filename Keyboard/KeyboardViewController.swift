@@ -67,6 +67,7 @@ final class KeyboardViewController: UIInputViewController {
     private var displayedPinyin = false
     private var keyLayouts: [Page: UIStackView] = [:]
     private var returnTitle = "换行"
+    private var keyboardWarmup: Task<Void, Never>?
 
     private let rows = UIView()
     private let keyArea = UIView()
@@ -74,7 +75,7 @@ final class KeyboardViewController: UIInputViewController {
     private var candidateButtons: [UIButton] = []
     private var displayedCandidates: [String] = []
     private var highlightsFirstCandidate = false
-    private let expandCandidates = UIButton(type: .system)
+    private let expandCandidates = CandidateToggleButton(type: .system)
     private let candidateGridScroll = UIScrollView()
     private var candidateGridButtons: [UIButton] = []
     private var showsCandidatePanel = false
@@ -128,7 +129,7 @@ final class KeyboardViewController: UIInputViewController {
         expandCandidates.addAction(UIAction { [weak self] _ in
             guard let self else { return }
             self.setCandidatePanelVisible(!self.showsCandidatePanel, animated: true)
-        }, for: .touchUpInside)
+        }, for: .touchDown)
         let toolbar = UIStackView(arrangedSubviews: [candidateScroll, divider, arrowSlot])
         toolbar.insetsLayoutMarginsFromSafeArea = false
         toolbar.isLayoutMarginsRelativeArrangement = true
@@ -190,8 +191,14 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        prepareLexicon()
-        if hasFullAccess { keyHaptic.prepare() }
+        refreshDocument()
+        keyboardWarmup?.cancel()
+        keyboardWarmup = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard let self, !Task.isCancelled else { return }
+            self.prepareLexicon()
+            if self.hasFullAccess { self.keyHaptic.prepare() }
+        }
 
         preferenceLoad?.cancel()
         let reading = Task.detached(priority: .utility) { KeyboardPreferences.showsPinyin }
@@ -210,6 +217,7 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
+        keyboardWarmup?.cancel()
         preferenceLoad?.cancel()
         composition = Composition()
         markedReading = ""
@@ -222,7 +230,6 @@ final class KeyboardViewController: UIInputViewController {
     override func viewWillLayoutSubviews() {
         super.viewWillLayoutSubviews()
         updatePreferredKeyAreaHeight()
-        if documentIdentifier != nil { updateKeys() }
     }
 
     override func viewDidLayoutSubviews() {
@@ -238,7 +245,7 @@ final class KeyboardViewController: UIInputViewController {
 
     private func updatePreferredKeyAreaHeight() {
         guard let height = portraitKeyAreaHeight else { return }
-        let isPortraitPhone = traitCollection.userInterfaceIdiom == .phone
+        let isPortraitPhone = UIDevice.current.userInterfaceIdiom == .phone
             && traitCollection.verticalSizeClass != .compact
         if height.isActive != isPortraitPhone { height.isActive = isPortraitPhone }
     }
@@ -509,14 +516,23 @@ final class KeyboardViewController: UIInputViewController {
 
     private func updateKeys() {
         let globe = needsInputModeSwitchKey
-        let returnKey = returnTitle
-        if globe != displayedGlobe || returnKey != displayedReturn || showsPinyin != displayedPinyin {
-            keyLayouts.values.forEach { $0.removeFromSuperview() }
-            keyLayouts.removeAll()
-            displayedPage = nil
+        if globe != displayedGlobe || returnTitle != displayedReturn {
             displayedGlobe = globe
-            displayedReturn = returnKey
+            displayedReturn = returnTitle
+            for (page, layout) in keyLayouts {
+                layout.arrangedSubviews.last?.removeFromSuperview()
+                layout.addArrangedSubview(makeRow(bottomKeys(for: page)))
+            }
+        }
+        if showsPinyin != displayedPinyin {
             displayedPinyin = showsPinyin
+            for layout in keyLayouts.values {
+                for case let row as UIStackView in layout.arrangedSubviews {
+                    for case let button as KeyboardButton in row.arrangedSubviews {
+                        button.setPinyinVisible(showsPinyin)
+                    }
+                }
+            }
         }
         guard page != displayedPage else { return }
         if let displayedPage { keyLayouts[displayedPage]?.isHidden = true }
@@ -525,7 +541,7 @@ final class KeyboardViewController: UIInputViewController {
             cached.isHidden = false
             return
         }
-        let layout = UIStackView(arrangedSubviews: keysForPage().map(makeRow))
+        let layout = UIStackView(arrangedSubviews: (keysForPage() + [bottomKeys(for: page)]).map(makeRow))
         layout.axis = .vertical
         layout.distribution = .fillEqually
         if #available(iOS 26.0, *) { layout.spacing = Self.portraitKeySpacing } else { layout.spacing = 8 }
@@ -543,7 +559,6 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func keysForPage() -> [[Key]] {
-        let isPhonetic = alternatePage == nil
         let isSymbols = page == .symbols
         let modifierWeight: CGFloat = page == .finals ? 1.1 : 1
         let shift = Key("", weight: modifierWeight, image: page == .finals ? "shift.fill" : "shift",
@@ -552,28 +567,16 @@ final class KeyboardViewController: UIInputViewController {
             self?.updateKeys()
         }
         let backspace = Key("", weight: modifierWeight, image: "delete.left", label: "删除") { [weak self] in self?.delete() }
-        let space = Key(isPhonetic ? "注" : "空格",
-                        weight: 5.42, label: isPhonetic ? "空格或一声" : "空格") { [weak self] in self?.space() }
-        let enter = Key(returnTitle == "换行" ? "" : returnTitle, weight: 2.15,
-                        image: returnTitle == "换行" ? "return" : nil,
-                        label: returnTitle) { [weak self] in self?.enter() }
-        let numbers = Key(isPhonetic ? "123" : "ㄅㄆㄇ", label: isPhonetic ? "数字页" : "返回注音") { [weak self] in
-            self?.showAlternatePage(isPhonetic ? .numbers : nil)
-        }
         let symbols = Key(isSymbols ? "123" : "#+=", weight: 1.4,
                           label: isSymbols ? "数字页" : "符号页") { [weak self] in
             self?.showAlternatePage(isSymbols ? .numbers : .symbols)
         }
-        let bottom = [numbers] + (displayedGlobe ? [Key("", image: "globe", label: "切换键盘")] : [])
-            + [space, enter]
-
         switch page {
         case .initials:
             return [
                 [Key("", weight: 0.43)] + phonetics("ㄅㄆㄇㄈㄉㄊㄋㄌ") + [Key("", weight: 0.43)],
                 phonetics("ㄍㄎㄏㄐㄑㄒㄧㄨㄩ"),
-                [shift] + phonetics("ㄓㄔㄕㄖㄗㄘㄙ") + [backspace],
-                bottom
+                [shift] + phonetics("ㄓㄔㄕㄖㄗㄘㄙ") + [backspace]
             ]
         case .finals:
             let tones = zip("ˊˇˋ˙", "2345").map { symbol, tone in
@@ -585,24 +588,35 @@ final class KeyboardViewController: UIInputViewController {
             return [
                 [Key("", weight: 0.43)] + phonetics("ㄚㄛㄜㄝㄞㄟㄠㄡ") + [Key("", weight: 0.43)],
                 [Key("")] + phonetics("ㄢㄣㄤㄥㄦㄧㄨㄩ"),
-                [shift, Key("", weight: 0.30)] + tones + [Key("", weight: 0.30), backspace],
-                bottom
+                [shift, Key("", weight: 0.30)] + tones + [Key("", weight: 0.30), backspace]
             ]
         case .numbers:
             return [
                 literals("1234567890"),
                 literals("－／：；（）￥＆＠＂"),
-                [symbols] + literals("，。！？、＇…") + [backspace],
-                bottom
+                [symbols] + literals("，。！？、＇…") + [backspace]
             ]
         case .symbols:
             return [
                 literals("[]{}#%^*+="),
                 literals("_\\|~<>€£¥•"),
-                [symbols] + literals(".,?!'@/") + [backspace],
-                bottom
+                [symbols] + literals(".,?!'@/") + [backspace]
             ]
         }
+    }
+
+    private func bottomKeys(for page: Page) -> [Key] {
+        let isPhonetic = page == .initials || page == .finals
+        let numbers = Key(isPhonetic ? "123" : "ㄅㄆㄇ", label: isPhonetic ? "数字页" : "返回注音") { [weak self] in
+            self?.showAlternatePage(isPhonetic ? .numbers : nil)
+        }
+        let space = Key(isPhonetic ? "注" : "空格",
+                        weight: 5.42, label: isPhonetic ? "空格或一声" : "空格") { [weak self] in self?.space() }
+        let enter = Key(returnTitle == "换行" ? "" : returnTitle, weight: 2.15,
+                        image: returnTitle == "换行" ? "return" : nil,
+                        label: returnTitle) { [weak self] in self?.enter() }
+        return [numbers] + (displayedGlobe ? [Key("", image: "globe", label: "切换键盘")] : [])
+            + [space, enter]
     }
 
     private func phonetics(_ symbols: String) -> [Key] {
@@ -674,25 +688,8 @@ final class KeyboardViewController: UIInputViewController {
                     button.titleLabel?.font = .systemFont(ofSize: key.accessibilityLabel == nil ? 22 : 15)
                     button.titleLabel?.adjustsFontSizeToFitWidth = true
                     button.titleLabel?.minimumScaleFactor = 0.65
-                    if showsPinyin, let pinyin = key.pinyin {
-                        // Keep the same one-line title for sizing and draw the caption inside the key.
-                        button.setTitleColor(.clear, for: .normal)
-                        button.setTitleColor(.clear, for: .highlighted)
-                        let caption = UILabel(frame: button.bounds)
-                        caption.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-                        caption.numberOfLines = 2
-                        caption.textAlignment = .center
-                        caption.isAccessibilityElement = false
-                        let text = NSMutableAttributedString(string: key.title, attributes: [
-                            .font: UIFont.systemFont(ofSize: 18), .foregroundColor: UIColor.label
-                        ])
-                        text.append(NSAttributedString(string: "\n" + pinyin, attributes: [
-                            .font: UIFont.systemFont(ofSize: 10, weight: .medium), .foregroundColor: UIColor.secondaryLabel
-                        ]))
-                        caption.attributedText = text
-                        button.addSubview(caption)
-                        button.accessibilityLabel = "\(key.title)，\(pinyin)"
-                    }
+                    button.pinyin = key.pinyin
+                    if showsPinyin { button.setPinyinVisible(true) }
                 }
                 if let action = key.action {
                     if !key.title.isEmpty,
@@ -865,9 +862,43 @@ private final class KeyboardInputView: UIInputView, UIInputViewAudioFeedback {
     var enableInputClicksWhenVisible: Bool { true }
 }
 
+private final class CandidateToggleButton: UIButton {
+    override func accessibilityActivate() -> Bool {
+        sendActions(for: .touchDown)
+        return true
+    }
+}
+
 private final class KeyboardButton: UIButton {
     var previewTitle: String?
+    var pinyin: String?
+    private var pinyinCaption: UILabel?
     private var shadowBounds: CGRect?
+
+    func setPinyinVisible(_ visible: Bool) {
+        guard let pinyin, let title = title(for: .normal) else { return }
+        // The one-line title still supplies the key's intrinsic size in both modes.
+        if visible, pinyinCaption == nil {
+            let caption = UILabel(frame: bounds)
+            caption.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            caption.numberOfLines = 2
+            caption.textAlignment = .center
+            caption.isAccessibilityElement = false
+            let text = NSMutableAttributedString(string: title, attributes: [
+                .font: UIFont.systemFont(ofSize: 18), .foregroundColor: UIColor.label
+            ])
+            text.append(NSAttributedString(string: "\n" + pinyin, attributes: [
+                .font: UIFont.systemFont(ofSize: 10, weight: .medium), .foregroundColor: UIColor.secondaryLabel
+            ]))
+            caption.attributedText = text
+            addSubview(caption)
+            pinyinCaption = caption
+        }
+        pinyinCaption?.isHidden = !visible
+        setTitleColor(visible ? .clear : .label, for: .normal)
+        setTitleColor(visible ? .clear : .label, for: .highlighted)
+        accessibilityLabel = visible ? "\(title)，\(pinyin)" : title
+    }
 
     override func layoutSubviews() {
         super.layoutSubviews()
