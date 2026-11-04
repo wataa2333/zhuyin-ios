@@ -8,19 +8,36 @@ final class KeyboardViewController: UIInputViewController {
         let weight: CGFloat
         let systemImage: String?
         let accessibilityLabel: String?
+        let pinyin: String?
         let action: (() -> Void)?
 
         init(_ title: String, weight: CGFloat = 1, image: String? = nil,
-             label: String? = nil, action: (() -> Void)? = nil) {
+             label: String? = nil, pinyin: String? = nil, action: (() -> Void)? = nil) {
             self.title = title
             self.weight = weight
             systemImage = image
             accessibilityLabel = label
+            self.pinyin = pinyin
             self.action = action
         }
     }
 
+    private static let pinyinBySymbol: [Character: String] = [
+        "ㄅ": "b", "ㄆ": "p", "ㄇ": "m", "ㄈ": "f", "ㄉ": "d", "ㄊ": "t", "ㄋ": "n", "ㄌ": "l",
+        "ㄍ": "g", "ㄎ": "k", "ㄏ": "h", "ㄐ": "j", "ㄑ": "q", "ㄒ": "x",
+        "ㄓ": "zh", "ㄔ": "ch", "ㄕ": "sh", "ㄖ": "r", "ㄗ": "z", "ㄘ": "c", "ㄙ": "s",
+        "ㄚ": "a", "ㄛ": "o", "ㄜ": "e", "ㄝ": "ê", "ㄞ": "ai", "ㄟ": "ei", "ㄠ": "ao", "ㄡ": "ou",
+        "ㄢ": "an", "ㄣ": "en", "ㄤ": "ang", "ㄥ": "eng", "ㄦ": "er", "ㄧ": "i", "ㄨ": "u", "ㄩ": "ü"
+    ]
+
+    private static let pinyinPreference = "showPinyinOnKeys"
+    private static let starterCandidates = ["我", "你", "这", "那", "他", "有", "因为", "我们"]
+    private var showsPinyin = UserDefaults.standard.bool(forKey: KeyboardViewController.pinyinPreference)
     private var composition = Composition()
+    private var markedReading = ""
+    private var updatingDocument = false
+    private var userDictionary = UserDictionary()
+    private var selectedSegments: [Candidate] = []
     private lazy var lexicon: Lexicon = {
         guard let url = Bundle(for: KeyboardViewController.self).url(forResource: "Lexicon", withExtension: "tsv"),
               let contents = try? String(contentsOf: url, encoding: .utf8) else {
@@ -39,7 +56,12 @@ final class KeyboardViewController: UIInputViewController {
     private let rows = UIStackView()
     private let candidateScroll = UIScrollView()
     private let candidateRow = UIStackView()
-    private let readingLabel = UILabel()
+    private let expandCandidates = UIButton(type: .system)
+    private let candidatePanel = UIStackView()
+    private let candidateGridScroll = UIScrollView()
+    private let candidateGrid = UIStackView()
+    private let pinyinToggle = UIButton(type: .system)
+    private var showsCandidatePanel = false
     private var keyboardHeight: NSLayoutConstraint?
 
     private var page: Page { alternatePage ?? (composition.showsFinals ? .finals : .initials) }
@@ -59,15 +81,12 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = UIColor { traits in
-            traits.userInterfaceStyle == .dark
-                ? UIColor(white: 0.16, alpha: 1)
-                : UIColor(red: 0.84, green: 0.85, blue: 0.88, alpha: 1)
-        }
+        installBackground()
 
         rows.axis = .vertical
         rows.distribution = .fillEqually
         rows.spacing = 8
+        if #available(iOS 26.0, *) { rows.spacing = 11 }
         candidateRow.spacing = 3
         candidateScroll.showsHorizontalScrollIndicator = false
         candidateScroll.addSubview(candidateRow)
@@ -80,25 +99,31 @@ final class KeyboardViewController: UIInputViewController {
             candidateRow.heightAnchor.constraint(equalTo: candidateScroll.frameLayoutGuide.heightAnchor)
         ])
 
-        readingLabel.font = .systemFont(ofSize: 15, weight: .medium)
-        readingLabel.textColor = .secondaryLabel
-        readingLabel.lineBreakMode = .byTruncatingHead
-        readingLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
-        readingLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 112).isActive = true
-        let toolbar = UIStackView(arrangedSubviews: [readingLabel, candidateScroll])
-        toolbar.spacing = 4
-        toolbar.heightAnchor.constraint(equalToConstant: 37).isActive = true
+        let divider = UIView()
+        divider.backgroundColor = .separator
+        divider.widthAnchor.constraint(equalToConstant: 1 / 3).isActive = true
+        expandCandidates.tintColor = .label
+        expandCandidates.widthAnchor.constraint(equalToConstant: 36).isActive = true
+        expandCandidates.addAction(UIAction { [weak self] _ in
+            guard let self else { return }
+            self.setCandidatePanelVisible(!self.showsCandidatePanel)
+        }, for: .touchUpInside)
+        let toolbar = UIStackView(arrangedSubviews: [candidateScroll, divider, expandCandidates])
+        toolbar.spacing = 3
+        toolbar.heightAnchor.constraint(equalToConstant: 38).isActive = true
+        configureCandidatePanel()
+        setCandidatePanelVisible(false)
 
-        let layout = UIStackView(arrangedSubviews: [toolbar, rows])
+        let layout = UIStackView(arrangedSubviews: [toolbar, rows, candidatePanel])
         layout.axis = .vertical
-        layout.spacing = 4
+        layout.spacing = 6
         layout.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(layout)
         let area = view.safeAreaLayoutGuide
         NSLayoutConstraint.activate([
             layout.leadingAnchor.constraint(equalTo: area.leadingAnchor, constant: 6),
             layout.trailingAnchor.constraint(equalTo: area.trailingAnchor, constant: -6),
-            layout.topAnchor.constraint(equalTo: area.topAnchor, constant: 2),
+            layout.topAnchor.constraint(equalTo: area.topAnchor, constant: 5),
             layout.bottomAnchor.constraint(equalTo: area.bottomAnchor, constant: -6)
         ])
 
@@ -117,7 +142,10 @@ final class KeyboardViewController: UIInputViewController {
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         composition = Composition()
+        markedReading = ""
+        selectedSegments.removeAll()
         alternatePage = nil
+        setCandidatePanelVisible(false)
     }
 
     override func viewWillLayoutSubviews() {
@@ -128,45 +156,166 @@ final class KeyboardViewController: UIInputViewController {
 
     override func textDidChange(_ textInput: UITextInput?) {
         super.textDidChange(textInput)
-        if isViewLoaded { refreshDocument() }
+        if isViewLoaded, !updatingDocument { refreshDocument() }
     }
 
     private var preferredHeight: CGFloat {
         traitCollection.verticalSizeClass == .compact ? 198 : 264
     }
 
+    private func installBackground() {
+        if #available(iOS 26.0, *) {
+            view.isOpaque = false
+            view.backgroundColor = .clear
+            let material = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterial))
+            material.isUserInteractionEnabled = false
+            material.layer.cornerCurve = .continuous
+            material.layer.cornerRadius = 27
+            material.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+            material.clipsToBounds = true
+            material.translatesAutoresizingMaskIntoConstraints = false
+            view.insertSubview(material, at: 0)
+            NSLayoutConstraint.activate([
+                material.topAnchor.constraint(equalTo: view.topAnchor),
+                material.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+                material.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                material.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+            ])
+        } else {
+            view.backgroundColor = UIColor { traits in
+                traits.userInterfaceStyle == .dark
+                    ? UIColor(white: 0.16, alpha: 1)
+                    : UIColor(red: 0.84, green: 0.85, blue: 0.88, alpha: 1)
+            }
+        }
+    }
+
     private func refreshDocument() {
+        switch textDocumentProxy.keyboardAppearance {
+        case .dark: view.overrideUserInterfaceStyle = .dark
+        case .light: view.overrideUserInterfaceStyle = .light
+        default: view.overrideUserInterfaceStyle = .unspecified
+        }
         let identifier = textDocumentProxy.documentIdentifier
         if documentIdentifier != identifier {
             composition = Composition()
+            markedReading = ""
+            selectedSegments.removeAll()
             alternatePage = nil
+            setCandidatePanelVisible(false)
             documentIdentifier = identifier
         }
         render()
     }
 
+    private func togglePinyin() {
+        showsPinyin.toggle()
+        UserDefaults.standard.set(showsPinyin, forKey: Self.pinyinPreference)
+        updatePinyinToggle()
+        displayedPage = nil
+        setCandidatePanelVisible(false)
+        updateKeys()
+    }
+
+    private func updatePinyinToggle() {
+        var configuration = showsPinyin ? UIButton.Configuration.tinted() : .plain()
+        configuration.title = showsPinyin ? "拼音标注：开" : "拼音标注：关"
+        configuration.baseForegroundColor = showsPinyin ? .systemBlue : .secondaryLabel
+        configuration.contentInsets = .zero
+        configuration.cornerStyle = .capsule
+        pinyinToggle.configuration = configuration
+        pinyinToggle.accessibilityValue = showsPinyin ? "已开启" : "已关闭"
+    }
+
     private func render() {
-        candidates = composition.hasInput ? lexicon.candidates(for: composition) : []
-        readingLabel.text = composition.display
-        readingLabel.isHidden = !composition.hasInput
+        if composition.hasInput {
+            candidates = lexicon.candidates(for: composition, learned: userDictionary.candidates)
+        } else if alternatePage == nil {
+            candidates = Self.starterCandidates.map { Candidate(text: $0) }
+        } else {
+            candidates = []
+        }
         candidateRow.arrangedSubviews.forEach { $0.removeFromSuperview() }
         candidateScroll.setContentOffset(.zero, animated: false)
 
         for (index, candidate) in candidates.enumerated() {
-            let button = UIButton(type: .system)
-            var config = UIButton.Configuration.plain()
-            config.title = candidate.text
-            config.baseForegroundColor = .label
-            config.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 9, bottom: 0, trailing: 9)
-            if index == 0 {
-                config.background.backgroundColor = UIColor.secondarySystemGroupedBackground
-            }
-            button.configuration = config
+            let button = candidateButton(candidate, highlighted: index == 0 && composition.hasInput)
             button.setContentCompressionResistancePriority(.required, for: .horizontal)
-            button.addAction(UIAction { [weak self] _ in self?.choose(candidate) }, for: .touchUpInside)
             candidateRow.addArrangedSubview(button)
         }
+        if showsCandidatePanel { updateCandidateGrid() }
         updateKeys()
+    }
+
+    private func candidateButton(_ candidate: Candidate, highlighted: Bool = false) -> UIButton {
+        let button = UIButton(type: .system)
+        var configuration = UIButton.Configuration.plain()
+        configuration.title = candidate.text
+        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
+            var attributes = attributes
+            attributes.font = .systemFont(ofSize: 18)
+            return attributes
+        }
+        configuration.baseForegroundColor = .label
+        configuration.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 9, bottom: 0, trailing: 9)
+        if highlighted { configuration.background.backgroundColor = .secondarySystemGroupedBackground }
+        button.configuration = configuration
+        button.titleLabel?.lineBreakMode = .byTruncatingTail
+        button.addAction(UIAction { [weak self] _ in self?.choose(candidate) }, for: .touchUpInside)
+        return button
+    }
+
+    private func configureCandidatePanel() {
+        pinyinToggle.accessibilityLabel = "按键拼音标注"
+        pinyinToggle.addAction(UIAction { [weak self] _ in self?.togglePinyin() }, for: .touchUpInside)
+        pinyinToggle.heightAnchor.constraint(equalToConstant: 32).isActive = true
+        updatePinyinToggle()
+
+        candidatePanel.axis = .vertical
+        candidatePanel.spacing = 5
+        candidatePanel.addArrangedSubview(pinyinToggle)
+        candidatePanel.addArrangedSubview(candidateGridScroll)
+        candidateGrid.axis = .vertical
+        candidateGrid.spacing = 4
+        candidateGridScroll.addSubview(candidateGrid)
+        candidateGrid.translatesAutoresizingMaskIntoConstraints = false
+        let content = candidateGridScroll.contentLayoutGuide
+        NSLayoutConstraint.activate([
+            candidateGrid.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            candidateGrid.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            candidateGrid.topAnchor.constraint(equalTo: content.topAnchor),
+            candidateGrid.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+            candidateGrid.widthAnchor.constraint(equalTo: candidateGridScroll.frameLayoutGuide.widthAnchor)
+        ])
+    }
+
+    private func setCandidatePanelVisible(_ visible: Bool) {
+        showsCandidatePanel = visible
+        rows.isHidden = visible
+        candidatePanel.isHidden = !visible
+        let image = UIImage(systemName: visible ? "chevron.up" : "chevron.down",
+                            withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .medium))
+        expandCandidates.setImage(image, for: .normal)
+        expandCandidates.accessibilityLabel = visible ? "收起候选字词" : "展开候选字词和拼音设置"
+        if visible {
+            updateCandidateGrid()
+            candidateGridScroll.setContentOffset(.zero, animated: false)
+        }
+    }
+
+    private func updateCandidateGrid() {
+        candidateGrid.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let columns = 4
+        for start in stride(from: 0, to: candidates.count, by: columns) {
+            let row = UIStackView()
+            row.spacing = 4
+            row.distribution = .fillEqually
+            let group = candidates[start..<min(start + columns, candidates.count)]
+            for candidate in group { row.addArrangedSubview(candidateButton(candidate)) }
+            for _ in group.count..<columns { row.addArrangedSubview(UIView()) }
+            candidateGrid.addArrangedSubview(row)
+            row.heightAnchor.constraint(equalToConstant: 36).isActive = true
+        }
     }
 
     private func updateKeys() {
@@ -211,7 +360,7 @@ final class KeyboardViewController: UIInputViewController {
             let tones = zip("ˊˇˋ˙", "2345").map { symbol, tone in
                 Key(String(symbol), weight: 1.65, label: "声调 \(tone)") { [weak self] in
                     self?.composition.finish(tone: tone)
-                    self?.render()
+                    self?.updateComposition()
                 }
             }
             return [
@@ -239,9 +388,9 @@ final class KeyboardViewController: UIInputViewController {
 
     private func phonetics(_ symbols: String) -> [Key] {
         symbols.map { symbol in
-            Key(String(symbol)) { [weak self] in
+            Key(String(symbol), pinyin: Self.pinyinBySymbol[symbol]) { [weak self] in
                 self?.composition.type(symbol)
-                self?.render()
+                self?.updateComposition()
             }
         }
     }
@@ -266,7 +415,12 @@ final class KeyboardViewController: UIInputViewController {
                 let button = KeyboardButton(type: .system)
                 button.accessibilityLabel = key.accessibilityLabel ?? key.title
                 button.backgroundColor = UIColor { traits in
-                    traits.userInterfaceStyle == .dark
+                    if #available(iOS 26.0, *) {
+                        return traits.userInterfaceStyle == .dark
+                            ? UIColor.white.withAlphaComponent(0.18)
+                            : UIColor.white.withAlphaComponent(0.78)
+                    }
+                    return traits.userInterfaceStyle == .dark
                         ? UIColor(white: 0.34, alpha: 1)
                         : .white
                 }
@@ -276,21 +430,42 @@ final class KeyboardViewController: UIInputViewController {
                 button.layer.shadowOpacity = 0.24
                 button.layer.shadowOffset = CGSize(width: 0, height: 1)
                 button.layer.shadowRadius = 0
+                if #available(iOS 26.0, *) {
+                    button.layer.cornerCurve = .continuous
+                    button.layer.cornerRadius = 9
+                    button.layer.shadowOpacity = 0.08
+                }
                 button.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
                 if let image = key.systemImage {
                     button.setImage(UIImage(systemName: image, withConfiguration: UIImage.SymbolConfiguration(pointSize: 17)), for: .normal)
+                } else if key.title == "注" {
+                    let marker = UILabel()
+                    marker.text = "注"
+                    marker.textColor = .secondaryLabel
+                    marker.font = .systemFont(ofSize: 12)
+                    marker.isAccessibilityElement = false
+                    marker.translatesAutoresizingMaskIntoConstraints = false
+                    button.addSubview(marker)
+                    NSLayoutConstraint.activate([
+                        marker.trailingAnchor.constraint(equalTo: button.trailingAnchor, constant: -10),
+                        marker.bottomAnchor.constraint(equalTo: button.bottomAnchor, constant: -5)
+                    ])
+                } else if showsPinyin, let pinyin = key.pinyin {
+                    let caption = NSMutableAttributedString(string: key.title, attributes: [
+                        .font: UIFont.systemFont(ofSize: 18), .foregroundColor: UIColor.label
+                    ])
+                    caption.append(NSAttributedString(string: "\n" + pinyin, attributes: [
+                        .font: UIFont.systemFont(ofSize: 10, weight: .medium), .foregroundColor: UIColor.secondaryLabel
+                    ]))
+                    button.titleLabel?.numberOfLines = 2
+                    button.titleLabel?.textAlignment = .center
+                    button.setAttributedTitle(caption, for: .normal)
+                    button.accessibilityLabel = "\(key.title)，\(pinyin)"
                 } else {
                     button.setTitle(key.title, for: .normal)
                     button.titleLabel?.font = .systemFont(ofSize: key.accessibilityLabel == nil ? 22 : 15)
                     button.titleLabel?.adjustsFontSizeToFitWidth = true
                     button.titleLabel?.minimumScaleFactor = 0.65
-                    if key.title == "注" {
-                        button.contentHorizontalAlignment = .trailing
-                        button.contentVerticalAlignment = .bottom
-                        button.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 0, leading: 0, bottom: 3, trailing: 7)
-                        button.setTitleColor(.tertiaryLabel, for: .normal)
-                        button.titleLabel?.font = .systemFont(ofSize: 12)
-                    }
                 }
                 if let action = key.action {
                     button.addAction(UIAction { _ in action() }, for: .touchUpInside)
@@ -311,13 +486,14 @@ final class KeyboardViewController: UIInputViewController {
 
     private func toggle(_ page: Page) {
         alternatePage = alternatePage == page ? nil : page
-        updateKeys()
+        render()
     }
 
     private func delete() {
         if composition.hasInput {
             composition.deleteBackward()
-            render()
+            if !composition.hasInput { selectedSegments.removeAll() }
+            updateComposition()
         } else {
             textDocumentProxy.deleteBackward()
         }
@@ -326,7 +502,7 @@ final class KeyboardViewController: UIInputViewController {
     private func space() {
         if alternatePage == nil, !composition.current.symbols.isEmpty {
             composition.finish(tone: "1")
-            render()
+            updateComposition()
         } else if composition.hasInput {
             commitPending()
         } else {
@@ -344,8 +520,48 @@ final class KeyboardViewController: UIInputViewController {
 
     private func choose(_ candidate: Candidate) {
         composition.consume(candidate.syllableCount)
-        textDocumentProxy.insertText(candidate.text)
+        if !candidate.reading.isEmpty {
+            userDictionary.learn(candidate)
+            if composition.hasInput || !selectedSegments.isEmpty {
+                selectedSegments.append(candidate)
+                if !composition.hasInput {
+                    userDictionary.learn(Candidate(
+                        text: selectedSegments.map(\.text).joined(),
+                        reading: selectedSegments.flatMap(\.reading)
+                    ))
+                    selectedSegments.removeAll()
+                }
+            }
+        }
+        setCandidatePanelVisible(false)
+        commit(candidate.text)
+        updateComposition()
+    }
+
+    private func updateComposition() {
+        let reading = composition.display
+        if markedReading != reading {
+            markedReading = reading
+            setMarkedText(reading, keepMarked: !reading.isEmpty)
+        }
         render()
+    }
+
+    private func setMarkedText(_ text: String, keepMarked: Bool) {
+        updatingDocument = true
+        defer { updatingDocument = false }
+        let proxy = textDocumentProxy
+        proxy.setMarkedText(text, selectedRange: NSRange(location: text.utf16.count, length: 0))
+        if !keepMarked { proxy.unmarkText() }
+    }
+
+    private func commit(_ text: String) {
+        if markedReading.isEmpty {
+            textDocumentProxy.insertText(text)
+        } else {
+            markedReading = ""
+            setMarkedText(text, keepMarked: false)
+        }
     }
 
     private func commitPending() {
@@ -356,7 +572,8 @@ final class KeyboardViewController: UIInputViewController {
         if composition.hasInput {
             let reading = composition.display
             composition = Composition()
-            textDocumentProxy.insertText(reading)
+            selectedSegments.removeAll()
+            commit(reading)
             render()
         }
     }
