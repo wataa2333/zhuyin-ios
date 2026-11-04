@@ -653,22 +653,30 @@ final class KeyboardViewController: UIInputViewController {
                         marker.trailingAnchor.constraint(equalTo: button.trailingAnchor, constant: -10),
                         marker.bottomAnchor.constraint(equalTo: button.bottomAnchor, constant: -5)
                     ])
-                } else if showsPinyin, let pinyin = key.pinyin {
-                    let caption = NSMutableAttributedString(string: key.title, attributes: [
-                        .font: UIFont.systemFont(ofSize: 18), .foregroundColor: UIColor.label
-                    ])
-                    caption.append(NSAttributedString(string: "\n" + pinyin, attributes: [
-                        .font: UIFont.systemFont(ofSize: 10, weight: .medium), .foregroundColor: UIColor.secondaryLabel
-                    ]))
-                    button.titleLabel?.numberOfLines = 2
-                    button.titleLabel?.textAlignment = .center
-                    button.setAttributedTitle(caption, for: .normal)
-                    button.accessibilityLabel = "\(key.title)，\(pinyin)"
                 } else {
                     button.setTitle(key.title, for: .normal)
                     button.titleLabel?.font = .systemFont(ofSize: key.accessibilityLabel == nil ? 22 : 15)
                     button.titleLabel?.adjustsFontSizeToFitWidth = true
                     button.titleLabel?.minimumScaleFactor = 0.65
+                    if showsPinyin, let pinyin = key.pinyin {
+                        // Keep the same one-line title for sizing and draw the caption inside the key.
+                        button.setTitleColor(.clear, for: .normal)
+                        button.setTitleColor(.clear, for: .highlighted)
+                        let caption = UILabel(frame: button.bounds)
+                        caption.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+                        caption.numberOfLines = 2
+                        caption.textAlignment = .center
+                        caption.isAccessibilityElement = false
+                        let text = NSMutableAttributedString(string: key.title, attributes: [
+                            .font: UIFont.systemFont(ofSize: 18), .foregroundColor: UIColor.label
+                        ])
+                        text.append(NSAttributedString(string: "\n" + pinyin, attributes: [
+                            .font: UIFont.systemFont(ofSize: 10, weight: .medium), .foregroundColor: UIColor.secondaryLabel
+                        ]))
+                        caption.attributedText = text
+                        button.addSubview(caption)
+                        button.accessibilityLabel = "\(key.title)，\(pinyin)"
+                    }
                 }
                 if let action = key.action {
                     if !key.title.isEmpty,
