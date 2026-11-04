@@ -1,6 +1,6 @@
 import UIKit
 
-final class KeyboardViewController: UIInputViewController {
+final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDelegate {
     private enum Page: Hashable { case initials, finals, numbers, symbols }
 
     private struct Key {
@@ -10,10 +10,11 @@ final class KeyboardViewController: UIInputViewController {
         let accessibilityLabel: String?
         let pinyin: String?
         let activatesOnTouchDown: Bool
+        let isDeleteKey: Bool
         let action: (() -> Void)?
 
         init(_ title: String, weight: CGFloat = 1, image: String? = nil,
-             label: String? = nil, pinyin: String? = nil, activatesOnTouchDown: Bool = false,
+             label: String? = nil, pinyin: String? = nil, activatesOnTouchDown: Bool = false, isDeleteKey: Bool = false,
              action: (() -> Void)? = nil) {
             self.title = title
             self.weight = weight
@@ -21,6 +22,7 @@ final class KeyboardViewController: UIInputViewController {
             accessibilityLabel = label
             self.pinyin = pinyin
             self.activatesOnTouchDown = activatesOnTouchDown
+            self.isDeleteKey = isDeleteKey
             self.action = action
         }
     }
@@ -90,6 +92,8 @@ final class KeyboardViewController: UIInputViewController {
     private var portraitKeyAreaHeight: NSLayoutConstraint?
     private let keyPreview = UILabel()
     private weak var previewKey: UIButton?
+    private var deleteHoldBounds: CGRect?
+    private var deleteRepeatTask: Task<Void, Never>?
     private var playsKeyHaptics = false
     private lazy var keyHaptic: UIImpactFeedbackGenerator = {
         if #available(iOS 17.5, *) {
@@ -156,6 +160,7 @@ final class KeyboardViewController: UIInputViewController {
         keyArea.clipsToBounds = true
         rows.translatesAutoresizingMaskIntoConstraints = false
         keyArea.addSubview(rows)
+        configureDeleteHold()
         candidateGridScroll.contentInsetAdjustmentBehavior = .never
         candidateGridScroll.translatesAutoresizingMaskIntoConstraints = false
         keyArea.addSubview(candidateGridScroll)
@@ -236,6 +241,11 @@ final class KeyboardViewController: UIInputViewController {
         }
     }
 
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        stopDeleteHold()
+    }
+
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         keyboardWarmup?.cancel()
@@ -307,6 +317,7 @@ final class KeyboardViewController: UIInputViewController {
         let identifier = proxy.documentIdentifier
         let changed = documentIdentifier != identifier
         if changed {
+            stopDeleteHold()
             composition = Composition()
             markedReading = ""
             selectedSegments.removeAll()
@@ -463,6 +474,7 @@ final class KeyboardViewController: UIInputViewController {
 
     private func setCandidatePanelVisible(_ visible: Bool, animated: Bool = false) {
         if visible, !hasMoreCandidates { return }
+        if visible { stopDeleteHold() }
         let changed = showsCandidatePanel != visible
         guard changed || !animated else { return }
         showsCandidatePanel = visible
@@ -630,7 +642,7 @@ final class KeyboardViewController: UIInputViewController {
             self?.showKeyPage()
         }
         let backspace = Key("", weight: modifierWeight, image: "delete.left", label: "删除",
-                            activatesOnTouchDown: true) { [weak self] in self?.delete() }
+                            activatesOnTouchDown: true, isDeleteKey: true) { [weak self] in self?.delete() }
         let symbols = Key(isSymbols ? "123" : "#+=", weight: 1.4,
                           label: isSymbols ? "数字页" : "符号页") { [weak self] in
             self?.showAlternatePage(isSymbols ? .numbers : .symbols)
@@ -754,6 +766,7 @@ final class KeyboardViewController: UIInputViewController {
                     if showsPinyin { button.setPinyinVisible(true) }
                 }
                 if let action = key.action {
+                    button.isDeleteKey = key.isDeleteKey
                     if !key.title.isEmpty,
                        key.pinyin != nil || key.accessibilityLabel == nil || "ˊˇˋ˙".contains(key.title) {
                         button.previewTitle = key.title
@@ -801,16 +814,21 @@ final class KeyboardViewController: UIInputViewController {
         return button.isDescendant(of: layout)
     }
 
-    private func playKeyFeedback() {
+    private func playKeyFeedback(at location: CGPoint? = nil) {
         UIDevice.current.playInputClick()
         if playsKeyHaptics {
-            keyHaptic.impactOccurred()
+            if #available(iOS 17.5, *), let location {
+                keyHaptic.impactOccurred(at: location)
+            } else {
+                keyHaptic.impactOccurred()
+            }
             keyHaptic.prepare()
         }
     }
 
     private func pressKey(_ sender: KeyboardButton) {
-        playKeyFeedback()
+        if !sender.isDeleteKey { stopDeleteHold() }
+        playKeyFeedback(at: sender.convert(CGPoint(x: sender.bounds.midX, y: sender.bounds.midY), to: view))
         guard let title = sender.previewTitle else { return }
         let key = sender.convert(sender.bounds, to: view)
         let width = max(44, key.width + 12)
@@ -830,6 +848,65 @@ final class KeyboardViewController: UIInputViewController {
     private func showAlternatePage(_ page: Page?) {
         alternatePage = page
         render()
+    }
+
+    private func configureDeleteHold() {
+        // Track on the shared container so deletion can cross from the finals page to initials.
+        let hold = UILongPressGestureRecognizer(target: self, action: #selector(handleDeleteHold(_:)))
+        hold.minimumPressDuration = 0.35
+        hold.allowableMovement = 14
+        hold.cancelsTouchesInView = false
+        hold.delaysTouchesBegan = false
+        hold.delaysTouchesEnded = false
+        hold.delegate = self
+        rows.addGestureRecognizer(hold)
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        var target = touch.view
+        while let current = target, current !== rows {
+            if let key = current as? KeyboardButton, key.isDeleteKey, isOnDisplayedPage(key) {
+                deleteHoldBounds = key.convert(key.bounds, to: rows).insetBy(dx: -10, dy: -10)
+                return true
+            }
+            target = current.superview
+        }
+        return false
+    }
+
+    @objc private func handleDeleteHold(_ hold: UILongPressGestureRecognizer) {
+        switch hold.state {
+        case .began:
+            guard let bounds = deleteHoldBounds, bounds.contains(hold.location(in: rows)) else { return }
+            let location = hold.location(in: view)
+            deleteRepeatTask = Task { [weak self] in
+                var repeatCount = 0
+                while !Task.isCancelled {
+                    guard let self, self.composition.hasInput || self.textDocumentProxy.hasText else { return }
+                    self.delete()
+                    self.playKeyFeedback(at: location)
+                    repeatCount += 1
+                    let interval: UInt64 = repeatCount < 8 ? 75_000_000 : 45_000_000
+                    do {
+                        try await Task.sleep(nanoseconds: interval)
+                    } catch {
+                        return
+                    }
+                }
+            }
+        case .changed:
+            if let bounds = deleteHoldBounds, !bounds.contains(hold.location(in: rows)) { stopDeleteHold() }
+        case .ended, .cancelled, .failed:
+            stopDeleteHold()
+        default:
+            break
+        }
+    }
+
+    private func stopDeleteHold() {
+        deleteRepeatTask?.cancel()
+        deleteRepeatTask = nil
+        deleteHoldBounds = nil
     }
 
     private func delete() {
@@ -992,6 +1069,7 @@ private final class KeyboardButton: UIButton {
     var previewTitle: String?
     var pinyin: String?
     var activatesOnTouchDown = false
+    var isDeleteKey = false
     private var pinyinCaption: UILabel?
     private var shadowBounds: CGRect?
 
