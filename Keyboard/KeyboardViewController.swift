@@ -66,7 +66,12 @@ final class KeyboardViewController: UIInputViewController {
     private var candidateTransition: UIViewPropertyAnimator?
     private var candidateGridWidth: CGFloat = 0
     private let keyPreview = UILabel()
-    private let keyHaptic = UISelectionFeedbackGenerator()
+    private lazy var keyHaptic: UIImpactFeedbackGenerator = {
+        if #available(iOS 17.5, *) {
+            return UIImpactFeedbackGenerator(style: .soft, view: view)
+        }
+        return UIImpactFeedbackGenerator(style: .soft)
+    }()
 
     private var page: Page { alternatePage ?? (composition.showsFinals ? .finals : .initials) }
     private var returnTitle: String {
@@ -89,7 +94,7 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        candidateRow.spacing = 3
+        candidateRow.spacing = 2
         candidateScroll.showsHorizontalScrollIndicator = false
         candidateScroll.addSubview(candidateRow)
         candidateRow.translatesAutoresizingMaskIntoConstraints = false
@@ -106,41 +111,42 @@ final class KeyboardViewController: UIInputViewController {
         divider.widthAnchor.constraint(equalToConstant: 1 / 3).isActive = true
         expandCandidates.tintColor = .label
         expandCandidates.widthAnchor.constraint(equalToConstant: 36).isActive = true
-        expandCandidates.addTarget(self, action: #selector(pressKey(_:)), for: .touchDown)
         expandCandidates.addAction(UIAction { [weak self] _ in
             guard let self else { return }
             self.setCandidatePanelVisible(!self.showsCandidatePanel, animated: true)
         }, for: .touchUpInside)
         let toolbar = UIStackView(arrangedSubviews: [candidateScroll, divider, expandCandidates])
         toolbar.spacing = 3
-        toolbar.heightAnchor.constraint(equalToConstant: 32).isActive = true
+        toolbar.heightAnchor.constraint(equalToConstant: 30).isActive = true
         configureCandidatePanel()
         keyArea.clipsToBounds = true
-        for content in [rows, candidateGridScroll] {
-            content.translatesAutoresizingMaskIntoConstraints = false
-            keyArea.addSubview(content)
-            NSLayoutConstraint.activate([
-                content.leadingAnchor.constraint(equalTo: keyArea.leadingAnchor),
-                content.trailingAnchor.constraint(equalTo: keyArea.trailingAnchor),
-                content.topAnchor.constraint(equalTo: keyArea.topAnchor),
-                content.bottomAnchor.constraint(equalTo: keyArea.bottomAnchor)
-            ])
-        }
-        setCandidatePanelVisible(false)
+        rows.translatesAutoresizingMaskIntoConstraints = false
+        keyArea.addSubview(rows)
 
         let layout = UIStackView(arrangedSubviews: [toolbar, keyArea])
         layout.axis = .vertical
-        layout.spacing = 5
+        layout.spacing = 3
         layout.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(layout)
+        candidateGridScroll.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(candidateGridScroll)
         let area = view.safeAreaLayoutGuide
         let sideInset: CGFloat = 7
         NSLayoutConstraint.activate([
             layout.leadingAnchor.constraint(equalTo: area.leadingAnchor, constant: sideInset),
             layout.trailingAnchor.constraint(equalTo: area.trailingAnchor, constant: -sideInset),
-            layout.topAnchor.constraint(equalTo: area.topAnchor, constant: 4),
-            layout.bottomAnchor.constraint(equalTo: area.bottomAnchor, constant: -6)
+            layout.topAnchor.constraint(equalTo: view.topAnchor, constant: 1),
+            layout.bottomAnchor.constraint(equalTo: area.bottomAnchor),
+            rows.leadingAnchor.constraint(equalTo: keyArea.leadingAnchor),
+            rows.trailingAnchor.constraint(equalTo: keyArea.trailingAnchor),
+            rows.topAnchor.constraint(equalTo: keyArea.topAnchor),
+            rows.bottomAnchor.constraint(equalTo: keyArea.bottomAnchor),
+            candidateGridScroll.leadingAnchor.constraint(equalTo: layout.leadingAnchor),
+            candidateGridScroll.trailingAnchor.constraint(equalTo: candidateScroll.trailingAnchor),
+            candidateGridScroll.topAnchor.constraint(equalTo: toolbar.topAnchor),
+            candidateGridScroll.bottomAnchor.constraint(equalTo: layout.bottomAnchor)
         ])
+        setCandidatePanelVisible(false)
 
         configureKeyPreview()
         let url = lexiconURL
@@ -182,7 +188,7 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        if showsCandidatePanel, abs(candidateGridWidth - keyArea.bounds.width) > 1 {
+        if showsCandidatePanel, abs(candidateGridWidth - candidateGridScroll.bounds.width) > 1 {
             updateCandidateGrid()
         }
     }
@@ -255,11 +261,7 @@ final class KeyboardViewController: UIInputViewController {
         }
         for (index, button) in candidateButtons.enumerated() {
             button.isHidden = index >= candidates.count
-            guard !button.isHidden, var configuration = button.configuration else { continue }
-            configuration.title = candidates[index].text
-            configuration.background.backgroundColor = index == 0 && composition.hasInput
-                ? .secondarySystemGroupedBackground : .clear
-            button.configuration = configuration
+            if !button.isHidden { configureCandidateButton(button, at: index) }
         }
         if candidateScroll.contentOffset != .zero { candidateScroll.setContentOffset(.zero, animated: false) }
         if showsCandidatePanel { updateCandidateGrid() }
@@ -275,11 +277,19 @@ final class KeyboardViewController: UIInputViewController {
             return attributes
         }
         configuration.baseForegroundColor = .label
-        configuration.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 9, bottom: 0, trailing: 9)
+        configuration.buttonSize = .small
+        configuration.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 7, bottom: 0, trailing: 7)
         button.configuration = configuration
         button.titleLabel?.lineBreakMode = .byTruncatingTail
-        button.addTarget(self, action: #selector(pressKey(_:)), for: .touchDown)
         return button
+    }
+
+    private func configureCandidateButton(_ button: UIButton, at index: Int) {
+        guard var configuration = button.configuration else { return }
+        configuration.title = candidates[index].text
+        configuration.background.backgroundColor = index == 0 && composition.hasInput
+            ? .secondarySystemGroupedBackground : .clear
+        button.configuration = configuration
     }
 
     @objc private func selectCandidate(_ button: UIButton) {
@@ -326,16 +336,18 @@ final class KeyboardViewController: UIInputViewController {
 
         let incoming: UIView = visible ? candidateGridScroll : rows
         let outgoing: UIView = visible ? rows : candidateGridScroll
-        let direction: CGFloat = visible ? -1 : 1
-        let distance: CGFloat = 22
-        incoming.transform = CGAffineTransform(translationX: 0, y: direction * distance)
+        // The expanded list starts at the toolbar, so only the keyboard rows move.
+        candidateScroll.alpha = 0
+        candidateScroll.isUserInteractionEnabled = false
+        candidateScroll.accessibilityElementsHidden = true
+        if !visible { incoming.transform = CGAffineTransform(translationX: 0, y: 22) }
         incoming.alpha = 0
         incoming.isHidden = false
         incoming.isUserInteractionEnabled = false
         outgoing.isUserInteractionEnabled = false
         outgoing.accessibilityElementsHidden = true
         let transition = UIViewPropertyAnimator(duration: 0.20, curve: .easeInOut) {
-            outgoing.transform = CGAffineTransform(translationX: 0, y: -direction * distance)
+            if visible { outgoing.transform = CGAffineTransform(translationX: 0, y: 22) }
             outgoing.alpha = 0
             incoming.transform = .identity
             incoming.alpha = 1
@@ -349,6 +361,9 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func finishCandidateTransition(showingCandidates: Bool) {
+        candidateScroll.alpha = showingCandidates ? 0 : 1
+        candidateScroll.isUserInteractionEnabled = !showingCandidates
+        candidateScroll.accessibilityElementsHidden = showingCandidates
         rows.isHidden = showingCandidates
         rows.isUserInteractionEnabled = !showingCandidates
         rows.accessibilityElementsHidden = showingCandidates
@@ -362,7 +377,7 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func updateCandidateGrid() {
-        let availableWidth = keyArea.bounds.width
+        let availableWidth = candidateGridScroll.bounds.width
         guard availableWidth >= 44 else { return }
         candidateGridWidth = availableWidth
         candidateGrid.arrangedSubviews.forEach { $0.removeFromSuperview() }
@@ -370,14 +385,12 @@ final class KeyboardViewController: UIInputViewController {
         var row = UIStackView()
         var occupied: CGFloat = 0
 
-        for (index, candidate) in candidates.enumerated() {
+        for index in candidates.indices {
             let button = candidateButton()
-            var configuration = button.configuration
-            configuration?.title = candidate.text
-            button.configuration = configuration
+            configureCandidateButton(button, at: index)
             button.tag = index
             button.addTarget(self, action: #selector(selectCandidate(_:)), for: .touchUpInside)
-            let width = min(availableWidth, max(44, ceil(button.intrinsicContentSize.width)))
+            let width = min(availableWidth, max(38, ceil(button.intrinsicContentSize.width)))
             if occupied > 0, occupied + spacing + width > availableWidth {
                 appendCandidateRow(row)
                 row = UIStackView()
@@ -526,7 +539,7 @@ final class KeyboardViewController: UIInputViewController {
                     if #available(iOS 26.0, *) {
                         return traits.userInterfaceStyle == .dark
                             ? UIColor.white.withAlphaComponent(0.18)
-                            : UIColor.white.withAlphaComponent(0.78)
+                            : .white
                     }
                     return traits.userInterfaceStyle == .dark
                         ? UIColor(white: 0.34, alpha: 1)
@@ -616,7 +629,7 @@ final class KeyboardViewController: UIInputViewController {
     @objc private func pressKey(_ sender: UIButton) {
         UIDevice.current.playInputClick()
         if hasFullAccess {
-            keyHaptic.selectionChanged()
+            keyHaptic.impactOccurred()
             keyHaptic.prepare()
         }
         guard let title = (sender as? KeyboardButton)?.previewTitle else { return }
