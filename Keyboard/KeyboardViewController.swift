@@ -37,13 +37,19 @@ final class KeyboardViewController: UIInputViewController {
         "恭喜": "🎉", "生日": "🎂", "生日快乐": "🎂", "晚安": "🌙", "太阳": "☀️", "下雨": "🌧️",
         "苹果": "🍎", "咖啡": "☕", "猫": "🐱", "狗": "🐶", "花": "🌸", "火": "🔥"
     ]
-    private var showsPinyin = KeyboardPreferences.showsPinyin
+    private var showsPinyin = KeyboardPreferences.localPinyin
+    private var preferenceLoad: Task<Void, Never>?
     private var composition = Composition()
     private var markedReading = ""
     private var updatingDocument = false
-    private var userDictionary = UserDictionary()
+    private lazy var userDictionary = UserDictionary()
     private var selectedSegments: [Candidate] = []
     private let lexiconURL = Bundle(for: KeyboardViewController.self).url(forResource: "Lexicon", withExtension: "tsv")
+    private static let lexiconLoad = Task.detached(priority: .utility) {
+        let url = Bundle(for: KeyboardViewController.self).url(forResource: "Lexicon", withExtension: "tsv")
+        return KeyboardViewController.loadLexicon(from: url)
+    }
+    private var awaitingLexicon = false
     private var lexicon: Lexicon?
     private var alternatePage: Page?
     private var documentIdentifier: UUID?
@@ -52,13 +58,16 @@ final class KeyboardViewController: UIInputViewController {
     private var displayedGlobe = false
     private var displayedReturn = ""
     private var displayedPinyin = false
-    private var keyLayouts: [Page: UIStackView] = [:]
+    private var keyLayouts: [Page: KeyboardPageView] = [:]
+    private var returnTitle = "换行"
 
     private let rows = UIView()
     private let keyArea = UIView()
     private let candidateScroll = UIScrollView()
     private let candidateRow = UIStackView()
     private var candidateButtons: [UIButton] = []
+    private var displayedCandidates: [String] = []
+    private var highlightsFirstCandidate = false
     private let expandCandidates = CandidateExpandButton(type: .system)
     private let candidateGridScroll = UIScrollView()
     private let candidateGrid = UIStackView()
@@ -74,7 +83,7 @@ final class KeyboardViewController: UIInputViewController {
     }()
 
     private var page: Page { alternatePage ?? (composition.showsFinals ? .finals : .initials) }
-    private var returnTitle: String {
+    private func currentReturnTitle() -> String {
         switch textDocumentProxy.returnKeyType {
         case .go: return "前往"
         case .search, .google, .yahoo: return "搜索"
@@ -160,22 +169,27 @@ final class KeyboardViewController: UIInputViewController {
         setCandidatePanelVisible(false)
 
         configureKeyPreview()
-        let url = lexiconURL
-        let loading = Task.detached(priority: .userInitiated) { Self.loadLexicon(from: url) }
-        Task { [weak self] in
-            let loaded = await loading.value
-            guard let self, self.lexicon == nil else { return }
-            self.lexicon = loaded
-            if self.composition.hasInput { self.render() }
-        }
-        render()
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        showsPinyin = KeyboardPreferences.showsPinyin
-        if hasFullAccess { keyHaptic.prepare() }
         refreshDocument(reloadCandidates: true)
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        prepareLexicon()
+        if hasFullAccess { keyHaptic.prepare() }
+
+        preferenceLoad?.cancel()
+        let reading = Task.detached(priority: .utility) { KeyboardPreferences.showsPinyin }
+        preferenceLoad = Task(priority: .utility) { [weak self] in
+            let enabled = await reading.value
+            guard let self, !Task.isCancelled, self.showsPinyin != enabled else { return }
+            KeyboardPreferences.saveLocally(enabled)
+            self.showsPinyin = enabled
+            self.updateKeys()
+        }
         DispatchQueue.main.async { [weak self] in
             guard let self, self.synchronizePinyinSetting() else { return }
             self.updateKeys()
@@ -184,6 +198,7 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
+        preferenceLoad?.cancel()
         composition = Composition()
         markedReading = ""
         selectedSegments.removeAll()
@@ -194,7 +209,7 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewWillLayoutSubviews() {
         super.viewWillLayoutSubviews()
-        updateKeys()
+        if documentIdentifier != nil { updateKeys() }
     }
 
     override func viewDidLayoutSubviews() {
@@ -219,7 +234,20 @@ final class KeyboardViewController: UIInputViewController {
         return Lexicon(contents: contents)
     }
 
+    private func prepareLexicon() {
+        guard lexicon == nil, !awaitingLexicon else { return }
+        awaitingLexicon = true
+        let loading = Self.lexiconLoad
+        Task(priority: .utility) { [weak self] in
+            let loaded = await loading.value
+            guard let self, self.lexicon == nil else { return }
+            self.lexicon = loaded
+            if self.composition.hasInput { self.render() }
+        }
+    }
+
     private func refreshDocument(reloadCandidates: Bool = false) {
+        returnTitle = currentReturnTitle()
         let identifier = textDocumentProxy.documentIdentifier
         let changed = documentIdentifier != identifier
         if changed {
@@ -242,6 +270,7 @@ final class KeyboardViewController: UIInputViewController {
         let code = (proxy.documentContextBeforeInput ?? "") + (proxy.selectedText ?? "")
             + (proxy.documentContextAfterInput ?? "")
         guard let enabled = KeyboardPreferences.pinyinSetting(from: code), showsPinyin != enabled else { return false }
+        preferenceLoad?.cancel()
         KeyboardPreferences.saveLocally(enabled)
         showsPinyin = enabled
         return true
@@ -262,6 +291,17 @@ final class KeyboardViewController: UIInputViewController {
         } else {
             candidates = []
         }
+        let titles = candidates.map(\.text)
+        let highlight = composition.hasInput && !candidates.isEmpty
+        if titles != displayedCandidates || highlight != highlightsFirstCandidate {
+            displayedCandidates = titles
+            highlightsFirstCandidate = highlight
+            updateCandidateBar()
+        }
+        updateKeys()
+    }
+
+    private func updateCandidateBar() {
         while candidateButtons.count < candidates.count {
             let button = candidateButton()
             button.tag = candidateButtons.count
@@ -276,7 +316,6 @@ final class KeyboardViewController: UIInputViewController {
         }
         if candidateScroll.contentOffset != .zero { candidateScroll.setContentOffset(.zero, animated: false) }
         if showsCandidatePanel { updateCandidateGrid() }
-        updateKeys()
     }
 
     private func candidateButton() -> UIButton {
@@ -442,18 +481,12 @@ final class KeyboardViewController: UIInputViewController {
             cached.isHidden = false
             return
         }
-        let layout = UIStackView(arrangedSubviews: keysForPage().map(makeRow))
-        layout.axis = .vertical
-        layout.distribution = .fillEqually
-        if #available(iOS 26.0, *) { layout.spacing = 11 } else { layout.spacing = 8 }
-        layout.translatesAutoresizingMaskIntoConstraints = false
+        let rowSpacing: CGFloat
+        if #available(iOS 26.0, *) { rowSpacing = 11 } else { rowSpacing = 8 }
+        let layout = KeyboardPageView(keyRows: keysForPage().map(makeRow), rowSpacing: rowSpacing)
+        layout.frame = rows.bounds
+        layout.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         rows.addSubview(layout)
-        NSLayoutConstraint.activate([
-            layout.leadingAnchor.constraint(equalTo: rows.leadingAnchor),
-            layout.trailingAnchor.constraint(equalTo: rows.trailingAnchor),
-            layout.topAnchor.constraint(equalTo: rows.topAnchor),
-            layout.bottomAnchor.constraint(equalTo: rows.bottomAnchor)
-        ])
         keyLayouts[page] = layout
     }
 
@@ -479,7 +512,7 @@ final class KeyboardViewController: UIInputViewController {
                           label: isSymbols ? "数字页" : "符号页") { [weak self] in
             self?.showAlternatePage(isSymbols ? .numbers : .symbols)
         }
-        let bottom = [numbers] + (needsInputModeSwitchKey ? [Key("", image: "globe", label: "切换键盘")] : [])
+        let bottom = [numbers] + (displayedGlobe ? [Key("", image: "globe", label: "切换键盘")] : [])
             + [space, enter]
 
         switch page {
@@ -538,10 +571,8 @@ final class KeyboardViewController: UIInputViewController {
         }
     }
 
-    private func makeRow(_ keys: [Key]) -> UIStackView {
-        let row = UIStackView()
-        row.spacing = 6
-        for key in keys {
+    private func makeRow(_ keys: [Key]) -> KeyboardPageView.Row {
+        keys.map { key in
             let element: UIView
             if key.title.isEmpty, key.systemImage == nil {
                 element = UIView()
@@ -569,7 +600,6 @@ final class KeyboardViewController: UIInputViewController {
                     button.layer.cornerRadius = 9
                     button.layer.shadowOpacity = 0.08
                 }
-                button.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
                 if let image = key.systemImage {
                     button.setImage(UIImage(systemName: image, withConfiguration: UIImage.SymbolConfiguration(pointSize: 17)), for: .normal)
                 } else if key.title == "注" {
@@ -616,14 +646,8 @@ final class KeyboardViewController: UIInputViewController {
                 }
                 element = button
             }
-            row.addArrangedSubview(element)
-            if let first = row.arrangedSubviews.first, first !== element {
-                let constraint = element.widthAnchor.constraint(equalTo: first.widthAnchor, multiplier: key.weight / keys[0].weight)
-                constraint.priority = UILayoutPriority(999)
-                constraint.isActive = true
-            }
+            return (element, key.weight)
         }
-        return row
     }
 
     private func configureKeyPreview() {
@@ -720,6 +744,7 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func updateComposition() {
+        if composition.hasInput { prepareLexicon() }
         let reading = composition.display
         if markedReading != reading {
             markedReading = reading
@@ -771,6 +796,47 @@ private final class KeyboardInputView: UIInputView, UIInputViewAudioFeedback {
     var enableInputClicksWhenVisible: Bool { true }
 }
 
+private final class KeyboardPageView: UIView {
+    typealias Row = [(view: UIView, weight: CGFloat)]
+
+    private let keyRows: [Row]
+    private let rowWeights: [CGFloat]
+    private let rowSpacing: CGFloat
+    private let keySpacing: CGFloat = 6
+    private var previousSize: CGSize?
+
+    init(keyRows: [Row], rowSpacing: CGFloat) {
+        self.keyRows = keyRows
+        rowWeights = keyRows.map { row in row.reduce(0) { $0 + $1.weight } }
+        self.rowSpacing = rowSpacing
+        super.init(frame: .zero)
+        for row in keyRows {
+            for key in row { addSubview(key.view) }
+        }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("Keyboard pages are built in code") }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard previousSize != bounds.size else { return }
+        previousSize = bounds.size
+        let height = max(0, (bounds.height - CGFloat(keyRows.count - 1) * rowSpacing) / CGFloat(keyRows.count))
+        for (index, row) in keyRows.enumerated() {
+            let width = max(0, bounds.width - CGFloat(row.count - 1) * keySpacing)
+            let unitWidth = width / rowWeights[index]
+            let y = CGFloat(index) * (height + rowSpacing)
+            var x: CGFloat = 0
+            for key in row {
+                let keyWidth = unitWidth * key.weight
+                key.view.frame = CGRect(x: x, y: y, width: keyWidth, height: height)
+                x += keyWidth + keySpacing
+            }
+        }
+    }
+}
+
 private final class CandidateExpandButton: UIButton {
     weak var keyboardKeys: UIView?
 
@@ -784,6 +850,14 @@ private final class CandidateExpandButton: UIButton {
 
 private final class KeyboardButton: UIButton {
     var previewTitle: String?
+    private var shadowBounds: CGRect?
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard shadowBounds != bounds else { return }
+        shadowBounds = bounds
+        layer.shadowPath = UIBezierPath(roundedRect: bounds, cornerRadius: layer.cornerRadius).cgPath
+    }
 
     override var isHighlighted: Bool {
         didSet { alpha = isHighlighted ? 0.62 : 1 }

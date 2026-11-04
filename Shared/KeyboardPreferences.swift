@@ -17,7 +17,11 @@ enum KeyboardPreferences {
     }
 
     static var showsPinyin: Bool {
-        sharedPinyin ?? UserDefaults.standard.bool(forKey: localPinyinKey)
+        sharedPinyin ?? localPinyin
+    }
+
+    static var localPinyin: Bool {
+        UserDefaults.standard.bool(forKey: localPinyinKey)
     }
 
     static func saveLocally(_ enabled: Bool) {
