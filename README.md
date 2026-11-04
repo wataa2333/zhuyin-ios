@@ -5,14 +5,18 @@ iPhone 键盘扩展，按 iOS「繁体中文 → 注音 → 动态调整」的�
 ## 安装试用
 
 1. 在 Mac 上用 Xcode 16 或更新版本打开 `Zhuyin.xcodeproj`，选择 `Zhuyin` scheme。
-2. 选择 iOS 16 或更新版本的 iPhone 模拟器并运行。真机安装需要为 `Zhuyin` 和 `ZhuyinKeyboard` 两个 target 选择同一个签名团队，将示例 Bundle ID 改成自己的唯一标识，扩展标识需保留 App 标识作为前缀。
+2. 选择 iOS 16 或更新版本的 iPhone 模拟器并运行。真机安装需要为 `Zhuyin` 和 `ZhuyinKeyboard` 两个 target 选择同一个签名团队，并使用该团队注册的 Bundle ID。扩展标识需保留 App 标识作为前缀。
 3. 在 iPhone 的「设置 → 通用 → 键盘 → 键盘 → 添加新键盘」启用「简体注音」，回到 App 的试打区或备忘录，长按地球键切换。
 
 Apple 的公开接口让扩展自行绘制键盘并通过文本代理上屏。密码和部分电话字段由系统键盘接管，宿主 App 也可以禁用第三方键盘。[Apple 键盘扩展文档](https://developer.apple.com/documentation/uikit/creating-a-custom-keyboard)
 
 ## Codemagic 编译
 
-在 Codemagic 连接本工程的 Git 仓库，手动运行 `ios-simulator`。构建会校验键盘扩展和词库已嵌入，再生成 `Zhuyin-Simulator.zip`。解压后可把 `Zhuyin.app` 拖入运行中的 iPhone 模拟器。真机安装需要单独签名的 IPA。
+在 Codemagic 连接本工程的 Git 仓库后，选择对应的手动构建流程。
+
+- `ios-device-unsigned` 生成 `Zhuyin-iPhone-Unsigned.ipa`，用于自行签名。签名时需保留并签署包内的键盘扩展。
+- `ios-device-signed` 生成可安装到已登记设备的 Ad Hoc IPA。在 Codemagic 的 Code signing identities 中配置 Apple Distribution 证书，以及 `com.wataa2333.zhuyin` 和 `com.wataa2333.zhuyin.keyboard` 各自的 Ad Hoc 描述文件。两个描述文件都需包含目标 iPhone。
+- `ios-simulator` 生成 `Zhuyin-Simulator.zip`。解压后可把 `Zhuyin.app` 拖入运行中的 iPhone 模拟器。
 
 ## 试打
 

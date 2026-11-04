@@ -1,4 +1,56 @@
 workflows:
+  ios-device-unsigned:
+    name: Zhuyin iPhone IPA (unsigned)
+    instance_type: mac_mini_m2
+    max_build_duration: 30
+    environment:
+      xcode: latest
+    scripts:
+      - name: Build the iPhone app and keyboard extension
+        script: |
+          set -euo pipefail
+          mkdir -p build/artifacts
+          xcodebuild build \
+            -project Zhuyin.xcodeproj \
+            -scheme Zhuyin \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee build/artifacts/xcodebuild.log
+      - name: Verify and package the unsigned IPA
+        script: |
+          set -euo pipefail
+          app="build/DerivedData/Build/Products/Release-iphoneos/Zhuyin.app"
+          keyboard="$app/PlugIns/ZhuyinKeyboard.appex"
+          test -x "$app/Zhuyin"
+          test -x "$keyboard/ZhuyinKeyboard"
+          test -s "$keyboard/Lexicon.tsv"
+          mkdir -p build/unsigned/Payload
+          ditto "$app" build/unsigned/Payload/Zhuyin.app
+          ditto -c -k --norsrc --keepParent build/unsigned/Payload build/artifacts/Zhuyin-iPhone-Unsigned.ipa
+    artifacts:
+      - build/artifacts/Zhuyin-iPhone-Unsigned.ipa
+      - build/artifacts/xcodebuild.log
+
+  ios-device-signed:
+    name: Zhuyin iPhone IPA (Ad Hoc)
+    instance_type: mac_mini_m2
+    max_build_duration: 30
+    environment:
+      xcode: latest
+      ios_signing:
+        distribution_type: ad_hoc
+        bundle_identifier: com.wataa2333.zhuyin
+    scripts:
+      - name: Apply the app and keyboard provisioning profiles
+        script: xcode-project use-profiles --project Zhuyin.xcodeproj
+      - name: Export the signed IPA
+        script: xcode-project build-ipa --project Zhuyin.xcodeproj --scheme Zhuyin
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+
   ios-simulator:
     name: Zhuyin iOS Simulator
     instance_type: mac_mini_m2

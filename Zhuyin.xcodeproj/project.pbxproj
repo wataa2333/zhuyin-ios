@@ -185,7 +185,7 @@
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", );
-				PRODUCT_BUNDLE_IDENTIFIER = org.example.dynamiczhuyin;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wataa2333.zhuyin;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 			};
 			name = Debug;
@@ -200,7 +200,7 @@
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", );
-				PRODUCT_BUNDLE_IDENTIFIER = org.example.dynamiczhuyin;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wataa2333.zhuyin;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 			};
 			name = Release;
@@ -213,7 +213,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Keyboard/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks", );
-				PRODUCT_BUNDLE_IDENTIFIER = org.example.dynamiczhuyin.keyboard;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wataa2333.zhuyin.keyboard;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 			};
@@ -227,7 +227,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Keyboard/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks", );
-				PRODUCT_BUNDLE_IDENTIFIER = org.example.dynamiczhuyin.keyboard;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wataa2333.zhuyin.keyboard;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 			};
