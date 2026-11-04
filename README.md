@@ -40,10 +40,10 @@ Apple 的公开接口让扩展自行绘制键盘并通过文本代理上屏。�
 
 ## 词库来源
 
-`Keyboard/Lexicon.tsv` 从 Rime 袖珍简化字拼音生成，用 pinyin-data 补充声调并使用 OpenCC 的单字表规范字形。固定版本和许可证见 `Keyboard/Notices`，这些文件随扩展一起打包。
+`Keyboard/Lexicon.tsv` 的多字词来自雾凇拼音基础词库，按上游权重选取 65,000 条读音。单字来自 Rime 袖珍简化字拼音，用 OpenCC 单字表规范字形。生成时优先采用 phrase-pinyin-data 的词组读音，再用 pinyin-data 补充声调。固定版本、来源和许可证见 `Keyboard/Notices`，随扩展一起打包。
 
-重建词库时，准备对应版本的三个源文件并运行：
+重建词库时，准备对应版本的五个源文件，最后两个参数分别是雾凇词表和词组拼音表。
 
 ```sh
-python3 Tools/build_lexicon.py /path/to/pinyin_simp.dict.yaml /path/to/pinyin.txt /path/to/TSCharacters.txt
+python3 Tools/build_lexicon.py pinyin_simp.dict.yaml pinyin-data/pinyin.txt TSCharacters.txt rime-ice/cn_dicts/base.dict.yaml phrase-pinyin-data/pinyin.txt
 ```

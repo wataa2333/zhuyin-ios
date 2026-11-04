@@ -1,7 +1,12 @@
-Lexicon.tsv is a derived dictionary. It converts Pinyin to Zhuyin, attaches tones,
-normalizes entries to simplified script, and reorders and deduplicates entries.
+Lexicon.tsv is a derived dictionary. The Rime Ice phrase data is selected by weight,
+converted from Pinyin to Zhuyin, annotated with tones, and deduplicated. The source
+files below and Tools/build_lexicon.py reproduce the bundled dictionary.
 
-- Rime pinyin_simp.dict.yaml, derived from Android Pinyin IME, Apache-2.0.
+- iDvel/rime-ice, cn_dicts/base.dict.yaml (phrase entries), GPL-3.0-only.
+  https://github.com/iDvel/rime-ice/blob/99662ba01e3affa6a0f009174ca530b887bac3b6/cn_dicts/base.dict.yaml
+- mozillazg/phrase-pinyin-data, pinyin.txt (phrase tone readings), MIT.
+  https://github.com/mozillazg/phrase-pinyin-data/blob/4afa3226ce53c9138b939e83c3bb294dbe0da511/pinyin.txt
+- Rime pinyin_simp.dict.yaml (single characters), derived from Android Pinyin IME, Apache-2.0.
   https://github.com/rime/rime-pinyin-simp/tree/0c6861ef7420ee780270ca6d993d18d4101049d0
 - mozillazg/pinyin-data, MIT.
   https://github.com/mozillazg/pinyin-data/tree/fe29ad32bdf352b31a02b9936e537f575432e9a6
