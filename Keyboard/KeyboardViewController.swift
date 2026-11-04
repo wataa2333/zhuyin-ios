@@ -54,6 +54,7 @@ final class KeyboardViewController: UIInputViewController {
     private var displayedReturn = ""
 
     private let rows = UIStackView()
+    private let keyArea = UIView()
     private let candidateScroll = UIScrollView()
     private let candidateRow = UIStackView()
     private let expandCandidates = UIButton(type: .system)
@@ -62,6 +63,7 @@ final class KeyboardViewController: UIInputViewController {
     private let candidateGrid = UIStackView()
     private let pinyinToggle = UIButton(type: .system)
     private var showsCandidatePanel = false
+    private var candidateGridWidth: CGFloat = 0
     private var keyboardHeight: NSLayoutConstraint?
 
     private var page: Page { alternatePage ?? (composition.showsFinals ? .finals : .initials) }
@@ -106,24 +108,35 @@ final class KeyboardViewController: UIInputViewController {
         expandCandidates.widthAnchor.constraint(equalToConstant: 36).isActive = true
         expandCandidates.addAction(UIAction { [weak self] _ in
             guard let self else { return }
-            self.setCandidatePanelVisible(!self.showsCandidatePanel)
+            self.setCandidatePanelVisible(!self.showsCandidatePanel, animated: true)
         }, for: .touchUpInside)
         let toolbar = UIStackView(arrangedSubviews: [candidateScroll, divider, expandCandidates])
         toolbar.spacing = 3
         toolbar.heightAnchor.constraint(equalToConstant: 38).isActive = true
         configureCandidatePanel()
+        for content in [rows, candidatePanel] {
+            content.translatesAutoresizingMaskIntoConstraints = false
+            keyArea.addSubview(content)
+            NSLayoutConstraint.activate([
+                content.leadingAnchor.constraint(equalTo: keyArea.leadingAnchor),
+                content.trailingAnchor.constraint(equalTo: keyArea.trailingAnchor),
+                content.topAnchor.constraint(equalTo: keyArea.topAnchor),
+                content.bottomAnchor.constraint(equalTo: keyArea.bottomAnchor)
+            ])
+        }
         setCandidatePanelVisible(false)
 
-        let layout = UIStackView(arrangedSubviews: [toolbar, rows, candidatePanel])
+        let layout = UIStackView(arrangedSubviews: [toolbar, keyArea])
         layout.axis = .vertical
-        layout.spacing = 6
+        layout.spacing = 7
         layout.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(layout)
         let area = view.safeAreaLayoutGuide
+        let sideInset: CGFloat = 7
         NSLayoutConstraint.activate([
-            layout.leadingAnchor.constraint(equalTo: area.leadingAnchor, constant: 6),
-            layout.trailingAnchor.constraint(equalTo: area.trailingAnchor, constant: -6),
-            layout.topAnchor.constraint(equalTo: area.topAnchor, constant: 5),
+            layout.leadingAnchor.constraint(equalTo: area.leadingAnchor, constant: sideInset),
+            layout.trailingAnchor.constraint(equalTo: area.trailingAnchor, constant: -sideInset),
+            layout.topAnchor.constraint(equalTo: area.topAnchor, constant: 8),
             layout.bottomAnchor.constraint(equalTo: area.bottomAnchor, constant: -6)
         ])
 
@@ -152,6 +165,13 @@ final class KeyboardViewController: UIInputViewController {
         super.viewWillLayoutSubviews()
         keyboardHeight?.constant = preferredHeight
         updateKeys()
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        if showsCandidatePanel, abs(candidateGridWidth - keyArea.bounds.width) > 1 {
+            updateCandidateGrid()
+        }
     }
 
     override func textDidChange(_ textInput: UITextInput?) {
@@ -213,8 +233,8 @@ final class KeyboardViewController: UIInputViewController {
         UserDefaults.standard.set(showsPinyin, forKey: Self.pinyinPreference)
         updatePinyinToggle()
         displayedPage = nil
-        setCandidatePanelVisible(false)
         updateKeys()
+        setCandidatePanelVisible(false, animated: true)
     }
 
     private func updatePinyinToggle() {
@@ -273,8 +293,8 @@ final class KeyboardViewController: UIInputViewController {
 
         candidatePanel.axis = .vertical
         candidatePanel.spacing = 5
-        candidatePanel.addArrangedSubview(pinyinToggle)
         candidatePanel.addArrangedSubview(candidateGridScroll)
+        candidatePanel.addArrangedSubview(pinyinToggle)
         candidateGrid.axis = .vertical
         candidateGrid.spacing = 4
         candidateGridScroll.addSubview(candidateGrid)
@@ -289,10 +309,9 @@ final class KeyboardViewController: UIInputViewController {
         ])
     }
 
-    private func setCandidatePanelVisible(_ visible: Bool) {
+    private func setCandidatePanelVisible(_ visible: Bool, animated: Bool = false) {
+        let changed = showsCandidatePanel != visible
         showsCandidatePanel = visible
-        rows.isHidden = visible
-        candidatePanel.isHidden = !visible
         let image = UIImage(systemName: visible ? "chevron.up" : "chevron.down",
                             withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .medium))
         expandCandidates.setImage(image, for: .normal)
@@ -301,21 +320,49 @@ final class KeyboardViewController: UIInputViewController {
             updateCandidateGrid()
             candidateGridScroll.setContentOffset(.zero, animated: false)
         }
+        let showContent = {
+            self.rows.isHidden = visible
+            self.candidatePanel.isHidden = !visible
+        }
+        if changed, animated, !UIAccessibility.isReduceMotionEnabled {
+            UIView.transition(with: keyArea, duration: 0.20,
+                              options: [.transitionCrossDissolve, .beginFromCurrentState, .allowUserInteraction],
+                              animations: showContent)
+        } else {
+            showContent()
+        }
     }
 
     private func updateCandidateGrid() {
+        let availableWidth = keyArea.bounds.width
+        guard availableWidth >= 44 else { return }
+        candidateGridWidth = availableWidth
         candidateGrid.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        let columns = 4
-        for start in stride(from: 0, to: candidates.count, by: columns) {
-            let row = UIStackView()
-            row.spacing = 4
-            row.distribution = .fillEqually
-            let group = candidates[start..<min(start + columns, candidates.count)]
-            for candidate in group { row.addArrangedSubview(candidateButton(candidate)) }
-            for _ in group.count..<columns { row.addArrangedSubview(UIView()) }
-            candidateGrid.addArrangedSubview(row)
-            row.heightAnchor.constraint(equalToConstant: 36).isActive = true
+        let spacing: CGFloat = 4
+        var row = UIStackView()
+        var occupied: CGFloat = 0
+
+        for candidate in candidates {
+            let button = candidateButton(candidate)
+            let width = min(availableWidth, max(44, ceil(button.intrinsicContentSize.width)))
+            if occupied > 0, occupied + spacing + width > availableWidth {
+                appendCandidateRow(row)
+                row = UIStackView()
+                occupied = 0
+            }
+            row.spacing = spacing
+            row.addArrangedSubview(button)
+            button.widthAnchor.constraint(equalToConstant: width).isActive = true
+            occupied += occupied > 0 ? spacing + width : width
         }
+        if occupied > 0 { appendCandidateRow(row) }
+    }
+
+    private func appendCandidateRow(_ row: UIStackView) {
+        if let last = row.arrangedSubviews.last { row.setCustomSpacing(0, after: last) }
+        row.addArrangedSubview(UIView())
+        candidateGrid.addArrangedSubview(row)
+        row.heightAnchor.constraint(equalToConstant: 36).isActive = true
     }
 
     private func updateKeys() {
@@ -330,15 +377,16 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func keysForPage() -> [[Key]] {
-        let shift = Key("", image: page == .finals ? "shift.fill" : "shift",
+        let modifierWeight: CGFloat = page == .finals ? 1.1 : 1
+        let shift = Key("", weight: modifierWeight, image: page == .finals ? "shift.fill" : "shift",
                         label: page == .finals ? "声母页" : "韵母页") { [weak self] in
             self?.composition.togglePage()
             self?.updateKeys()
         }
-        let backspace = Key("", image: "delete.left", label: "删除") { [weak self] in self?.delete() }
+        let backspace = Key("", weight: modifierWeight, image: "delete.left", label: "删除") { [weak self] in self?.delete() }
         let space = Key(page == .initials || page == .finals ? "注" : "空格",
-                        weight: 4.3, label: "空格或一声") { [weak self] in self?.space() }
-        let enter = Key(returnTitle == "换行" ? "" : returnTitle, weight: 2.1,
+                        weight: 4.42, label: "空格或一声") { [weak self] in self?.space() }
+        let enter = Key(returnTitle == "换行" ? "" : returnTitle, weight: 2.15,
                         image: returnTitle == "换行" ? "return" : nil,
                         label: returnTitle) { [weak self] in self?.enter() }
         let numbers = Key(page == .numbers ? "ㄅㄆㄇ" : "123", label: "数字与符号") { [weak self] in
@@ -358,7 +406,7 @@ final class KeyboardViewController: UIInputViewController {
             ]
         case .finals:
             let tones = zip("ˊˇˋ˙", "2345").map { symbol, tone in
-                Key(String(symbol), weight: 1.65, label: "声调 \(tone)") { [weak self] in
+                Key(String(symbol), weight: 1.55, label: "声调 \(tone)") { [weak self] in
                     self?.composition.finish(tone: tone)
                     self?.updateComposition()
                 }
@@ -366,7 +414,7 @@ final class KeyboardViewController: UIInputViewController {
             return [
                 [Key("", weight: 0.43)] + phonetics("ㄚㄛㄜㄝㄞㄟㄠㄡ") + [Key("", weight: 0.43)],
                 [Key("")] + phonetics("ㄢㄣㄤㄥㄦㄧㄨㄩ"),
-                [shift, Key("", weight: 0.36)] + tones + [Key("", weight: 0.36), backspace],
+                [shift, Key("", weight: 0.30)] + tones + [Key("", weight: 0.30), backspace],
                 bottom
             ]
         case .numbers:
@@ -406,7 +454,7 @@ final class KeyboardViewController: UIInputViewController {
 
     private func makeRow(_ keys: [Key]) -> UIStackView {
         let row = UIStackView()
-        row.spacing = 5
+        row.spacing = 6
         for key in keys {
             let element: UIView
             if key.title.isEmpty, key.systemImage == nil {
@@ -533,7 +581,7 @@ final class KeyboardViewController: UIInputViewController {
                 }
             }
         }
-        setCandidatePanelVisible(false)
+        setCandidatePanelVisible(false, animated: true)
         commit(candidate.text)
         updateComposition()
     }
