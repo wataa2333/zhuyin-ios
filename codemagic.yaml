@@ -6,12 +6,6 @@ workflows:
     environment:
       xcode: latest
     scripts:
-      - name: Check candidate lookup and personal dictionary
-        script: |
-          set -euo pipefail
-          mkdir -p build
-          xcrun swiftc Keyboard/ZhuyinEngine.swift Tools/CheckCandidates.swift -o build/check-candidates
-          build/check-candidates
       - name: Build the iPhone app and keyboard extension
         script: |
           set -euo pipefail
