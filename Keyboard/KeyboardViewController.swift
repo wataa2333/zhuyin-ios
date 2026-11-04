@@ -59,7 +59,7 @@ final class KeyboardViewController: UIInputViewController {
     private let candidateScroll = UIScrollView()
     private let candidateRow = UIStackView()
     private var candidateButtons: [UIButton] = []
-    private let expandCandidates = UIButton(type: .system)
+    private let expandCandidates = CandidateExpandButton(type: .system)
     private let candidateGridScroll = UIScrollView()
     private let candidateGrid = UIStackView()
     private var showsCandidatePanel = false
@@ -109,13 +109,19 @@ final class KeyboardViewController: UIInputViewController {
         let divider = UIView()
         divider.backgroundColor = .separator
         divider.widthAnchor.constraint(equalToConstant: 1 / 3).isActive = true
-        expandCandidates.tintColor = .label
-        expandCandidates.widthAnchor.constraint(equalToConstant: 36).isActive = true
+        let arrowSpace = UIView()
+        arrowSpace.widthAnchor.constraint(equalToConstant: 44).isActive = true
+        let sideInset: CGFloat = 7
+        var arrowConfiguration = UIButton.Configuration.plain()
+        arrowConfiguration.baseForegroundColor = .label
+        arrowConfiguration.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 0, bottom: 12, trailing: sideInset)
+        expandCandidates.configuration = arrowConfiguration
+        expandCandidates.keyboardKeys = keyArea
         expandCandidates.addAction(UIAction { [weak self] _ in
             guard let self else { return }
             self.setCandidatePanelVisible(!self.showsCandidatePanel, animated: true)
         }, for: .touchUpInside)
-        let toolbar = UIStackView(arrangedSubviews: [candidateScroll, divider, expandCandidates])
+        let toolbar = UIStackView(arrangedSubviews: [candidateScroll, divider, arrowSpace])
         toolbar.spacing = 3
         toolbar.heightAnchor.constraint(equalToConstant: 30).isActive = true
         configureCandidatePanel()
@@ -130,8 +136,9 @@ final class KeyboardViewController: UIInputViewController {
         view.addSubview(layout)
         candidateGridScroll.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(candidateGridScroll)
+        expandCandidates.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(expandCandidates)
         let area = view.safeAreaLayoutGuide
-        let sideInset: CGFloat = 7
         NSLayoutConstraint.activate([
             layout.leadingAnchor.constraint(equalTo: area.leadingAnchor, constant: sideInset),
             layout.trailingAnchor.constraint(equalTo: area.trailingAnchor, constant: -sideInset),
@@ -144,7 +151,11 @@ final class KeyboardViewController: UIInputViewController {
             candidateGridScroll.leadingAnchor.constraint(equalTo: layout.leadingAnchor),
             candidateGridScroll.trailingAnchor.constraint(equalTo: candidateScroll.trailingAnchor),
             candidateGridScroll.topAnchor.constraint(equalTo: toolbar.topAnchor),
-            candidateGridScroll.bottomAnchor.constraint(equalTo: layout.bottomAnchor)
+            candidateGridScroll.bottomAnchor.constraint(equalTo: layout.bottomAnchor),
+            expandCandidates.leadingAnchor.constraint(equalTo: arrowSpace.leadingAnchor),
+            expandCandidates.trailingAnchor.constraint(equalTo: area.trailingAnchor),
+            expandCandidates.topAnchor.constraint(equalTo: view.topAnchor),
+            expandCandidates.heightAnchor.constraint(equalToConstant: 44)
         ])
         setCandidatePanelVisible(false)
 
@@ -323,7 +334,9 @@ final class KeyboardViewController: UIInputViewController {
         showsCandidatePanel = visible
         let image = UIImage(systemName: visible ? "chevron.up" : "chevron.down",
                             withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .medium))
-        expandCandidates.setImage(image, for: .normal)
+        var arrowConfiguration = expandCandidates.configuration
+        arrowConfiguration?.image = image
+        expandCandidates.configuration = arrowConfiguration
         expandCandidates.accessibilityLabel = visible ? "收起候选字词" : "展开候选字词"
         if visible {
             updateCandidateGrid()
@@ -756,6 +769,17 @@ final class KeyboardViewController: UIInputViewController {
 
 private final class KeyboardInputView: UIInputView, UIInputViewAudioFeedback {
     var enableInputClicksWhenVisible: Bool { true }
+}
+
+private final class CandidateExpandButton: UIButton {
+    weak var keyboardKeys: UIView?
+
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        guard super.point(inside: point, with: event) else { return false }
+        guard let keyboardKeys else { return true }
+        // The larger target may overlap the first key row. Give actual keys priority.
+        return !(keyboardKeys.hitTest(convert(point, to: keyboardKeys), with: event) is UIButton)
+    }
 }
 
 private final class KeyboardButton: UIButton {
