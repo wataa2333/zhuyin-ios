@@ -41,9 +41,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         "你好", "谢谢", "可以", "今天", "怎么", "现在", "知道", "好的"
     ]
     private static let candidateFont = UIFont.systemFont(ofSize: 19)
-    private static let candidateBarHeight: CGFloat = 44
-    private static let portraitKeyHeight: CGFloat = 42
-    private static let portraitKeySpacing: CGFloat = 9
+    private static let candidateBarHeight = KeyboardLayoutConfiguration.candidateBarHeight
     private static let emojiByWord = [
         "想": "🤔", "下": "⬇️", "心": "❤️", "爱": "❤️", "你好": "👋", "再见": "👋",
         "笑": "😄", "哈哈": "😂", "哭": "😢", "生气": "😡", "谢谢": "🙏", "赞": "👍",
@@ -53,14 +51,12 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     private var showsPinyin = KeyboardPreferences.localPinyin
     private var preferenceLoad: Task<Void, Never>?
     private var composition = Composition()
-    private var markedReading = ""
+    private var textWriter = CompositionTextWriter()
     private var updatingDocument = false
     private lazy var userDictionary = UserDictionary()
     private var selectedSegments: [Candidate] = []
-    private lazy var lexiconURL = Bundle(for: KeyboardViewController.self).url(forResource: "Lexicon", withExtension: "tsv")
     private static let lexiconLoad = Task.detached(priority: .utility) {
-        let url = Bundle(for: KeyboardViewController.self).url(forResource: "Lexicon", withExtension: "tsv")
-        return KeyboardViewController.loadLexicon(from: url)
+        KeyboardViewController.loadLexicon()
     }
     private var awaitingLexicon = false
     private var lexicon: Lexicon?
@@ -95,6 +91,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     private var candidateViewportWidth: CGFloat = 0
     private var candidateGridWidth: CGFloat = 0
     private var portraitKeyAreaHeight: NSLayoutConstraint?
+    private var appliedLayout: KeyboardLayoutConfiguration?
     private let keyPreview = UILabel()
     private weak var previewKey: UIButton?
     private var deleteHoldBounds: CGRect?
@@ -133,7 +130,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     }
 
     override func loadView() {
-        inputView = UIInputView(frame: .zero, inputViewStyle: .keyboard)
+        inputView = KeyboardInputView(frame: .zero, inputViewStyle: .keyboard)
     }
 
     override func viewDidLoad() {
@@ -143,7 +140,16 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
 
         let divider = UIView()
         divider.backgroundColor = .separator
-        divider.widthAnchor.constraint(equalToConstant: 1 / 3).isActive = true
+        divider.translatesAutoresizingMaskIntoConstraints = false
+        let dividerSlot = UIView()
+        dividerSlot.addSubview(divider)
+        NSLayoutConstraint.activate([
+            dividerSlot.widthAnchor.constraint(equalToConstant: 1 / max(1, traitCollection.displayScale)),
+            divider.leadingAnchor.constraint(equalTo: dividerSlot.leadingAnchor),
+            divider.trailingAnchor.constraint(equalTo: dividerSlot.trailingAnchor),
+            divider.centerYAnchor.constraint(equalTo: dividerSlot.centerYAnchor),
+            divider.heightAnchor.constraint(equalToConstant: KeyboardLayoutConfiguration.dividerHeight)
+        ])
         let sideInset: CGFloat = 7
         let arrowSlot = UIView()
         arrowSlot.addSubview(expandCandidates)
@@ -160,7 +166,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             self.setCandidatePanelVisible(!self.showsCandidatePanel)
             self.playKeyFeedback()
         }
-        let toolbar = UIStackView(arrangedSubviews: [candidateScroll, divider, arrowSlot])
+        let toolbar = UIStackView(arrangedSubviews: [candidateScroll, dividerSlot, arrowSlot])
         toolbar.insetsLayoutMarginsFromSafeArea = false
         toolbar.isLayoutMarginsRelativeArrangement = true
         toolbar.layoutMargins = UIEdgeInsets(top: 0, left: sideInset, bottom: 0, right: 0)
@@ -176,14 +182,14 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
 
         let layout = UIStackView(arrangedSubviews: [toolbar, keyArea])
         layout.axis = .vertical
-        layout.spacing = 2
+        layout.spacing = KeyboardLayoutConfiguration.toolbarSpacing
         layout.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(layout)
         let area = view.safeAreaLayoutGuide
         NSLayoutConstraint.activate([
             layout.leadingAnchor.constraint(equalTo: area.leadingAnchor),
             layout.trailingAnchor.constraint(equalTo: area.trailingAnchor),
-            layout.topAnchor.constraint(equalTo: view.topAnchor, constant: 1),
+            layout.topAnchor.constraint(equalTo: view.topAnchor, constant: KeyboardLayoutConfiguration.topInset),
             layout.bottomAnchor.constraint(equalTo: area.bottomAnchor),
             arrowSlot.widthAnchor.constraint(equalToConstant: 44 + sideInset),
             expandCandidates.leadingAnchor.constraint(equalTo: arrowSlot.leadingAnchor),
@@ -199,20 +205,17 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             candidateGridScroll.topAnchor.constraint(equalTo: keyArea.topAnchor),
             candidateGridScroll.bottomAnchor.constraint(equalTo: keyArea.bottomAnchor)
         ])
-        if #available(iOS 26.0, *) {
-            let height = keyArea.heightAnchor.constraint(
-                equalToConstant: 4 * Self.portraitKeyHeight + 3 * Self.portraitKeySpacing
-            )
-            // Keep the initial size measurable without overriding a height imposed by the host.
-            height.priority = UILayoutPriority(751)
-            portraitKeyAreaHeight = height
-            updatePreferredKeyAreaHeight()
-        }
+        let height = keyArea.heightAnchor.constraint(
+            equalToConstant: KeyboardLayoutConfiguration.portrait.keyAreaHeight
+        )
+        height.priority = UILayoutPriority(999)
+        height.isActive = true
+        portraitKeyAreaHeight = height
+        updatePreferredKeyAreaHeight()
         setCandidatePanelVisible(false, animated: false)
 
         configureKeyPreview()
-        refreshInputTraits(from: textDocumentProxy)
-        updateKeys()
+        // viewWillAppear reads the input traits and builds the initial page once.
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -223,15 +226,17 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        canPlayKeyFeedback = hasFullAccess
-        refreshDocument()
         keyboardWarmup?.cancel()
         keyboardWarmup = Task { [weak self] in
-            guard !Task.isCancelled else { return }
-            self?.prepareFinalsPage()
-            try? await Task.sleep(nanoseconds: 250_000_000)
+            // Prepare only the database handle after the first frame; no word list is parsed here.
+            try? await Task.sleep(nanoseconds: 500_000_000)
             guard let self, !Task.isCancelled else { return }
+            // Spotlight needs only its initial page until the user starts composing.
+            guard !self.isSearchField else { return }
+            self.prepareFinalsPage()
             self.prepareLexicon()
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            guard !Task.isCancelled else { return }
             self.hapticGenerator()?.prepare()
             self.prepareClickPlayers()
             self.clickPlayers.values.forEach { _ = $0.prepareToPlay() }
@@ -255,7 +260,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             self.updateKeys()
         }
         DispatchQueue.main.async { [weak self] in
-            guard let self, self.synchronizeSettings() else { return }
+            guard let self, !self.isSearchField, self.synchronizeSettings() else { return }
             self.updateKeys()
         }
     }
@@ -272,7 +277,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         clickPlayers.values.forEach { $0.stop() }
         if clickPlayers.isEmpty { attemptedClickSetup = false }
         composition = Composition()
-        markedReading = ""
+        textWriter.reset()
         selectedSegments.removeAll()
         alternatePage = nil
         keyPreview.isHidden = true
@@ -300,9 +305,12 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
 
     private func updatePreferredKeyAreaHeight() {
         guard let height = portraitKeyAreaHeight else { return }
-        let isPortraitPhone = UIDevice.current.userInterfaceIdiom == .phone
-            && traitCollection.verticalSizeClass != .compact
-        if height.isActive != isPortraitPhone { height.isActive = isPortraitPhone }
+        let configuration: KeyboardLayoutConfiguration = traitCollection.verticalSizeClass == .compact ? .compact : .portrait
+        guard configuration != appliedLayout else { return }
+        appliedLayout = configuration
+        height.constant = configuration.keyAreaHeight
+        (inputView as? KeyboardInputView)?.contentHeight = configuration.contentHeight
+        for layout in keyLayouts.values { layout.spacing = configuration.rowSpacing }
     }
 
     override func textDidChange(_ textInput: UITextInput?) {
@@ -312,11 +320,16 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
 
     override func selectionDidChange(_ textInput: UITextInput?) {
         super.selectionDidChange(textInput)
-        if isViewLoaded, !updatingDocument, synchronizeSettings() { updateKeys() }
+        if isViewLoaded, !isSearchField, !updatingDocument, synchronizeSettings() { updateKeys() }
     }
 
-    private nonisolated static func loadLexicon(from url: URL?) -> Lexicon {
-        let contents = url.flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? ""
+    private nonisolated static func loadLexicon() -> Lexicon {
+        let bundle = Bundle(for: KeyboardViewController.self)
+        if let url = bundle.url(forResource: "Lexicon", withExtension: "sqlite"),
+           let indexed = try? Lexicon(databaseURL: url) { return indexed }
+        // The small legacy dictionary is an emergency fallback for a damaged/missing database.
+        let contents = bundle.url(forResource: "Lexicon", withExtension: "tsv")
+            .flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? ""
         return Lexicon(contents: contents)
     }
 
@@ -341,13 +354,13 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         if changed {
             stopDeleteHold()
             composition = Composition()
-            markedReading = ""
+            textWriter.reset()
             selectedSegments.removeAll()
             alternatePage = nil
             setCandidatePanelVisible(false, animated: false)
             documentIdentifier = identifier
         }
-        if changed || reloadCandidates { _ = synchronizeSettings() }
+        if !isSearchField, changed || reloadCandidates { _ = synchronizeSettings() }
         updateKeys()
         if isSearchField && !composition.hasInput {
             // Keep the toolbar's height, but skip the idle candidate buttons in search fields.
@@ -607,7 +620,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         layout.axis = .vertical
         layout.distribution = .fillEqually
         layout.isHidden = true
-        if #available(iOS 26.0, *) { layout.spacing = Self.portraitKeySpacing } else { layout.spacing = 8 }
+        layout.spacing = (appliedLayout ?? .portrait).rowSpacing
         // The host can measure the keyboard before giving it a height.
         // Keep the key rows in the constraint chain so they contribute their intrinsic size.
         layout.translatesAutoresizingMaskIntoConstraints = false
@@ -1001,40 +1014,21 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     private func updateComposition() {
         showKeyPage()
         if composition.hasInput { prepareLexicon() }
-        let reading = composition.display
-        if markedReading != reading {
-            markedReading = reading
-            setMarkedText(reading, keepMarked: !reading.isEmpty)
-        }
-        scheduleCandidateRefresh()
-    }
-
-    private func setMarkedText(_ text: String, keepMarked: Bool) {
         updatingDocument = true
-        defer { updatingDocument = false }
-        let proxy = textDocumentProxy
-        proxy.setMarkedText(text, selectedRange: NSRange(location: text.utf16.count, length: 0))
-        if !keepMarked { proxy.unmarkText() }
+        textWriter.update(composition.display, in: ProxyTextDocument(proxy: textDocumentProxy))
+        updatingDocument = false
+        scheduleCandidateRefresh()
     }
 
     private func commit(_ text: String) {
         updatingDocument = true
         defer { updatingDocument = false }
-        let proxy = textDocumentProxy
-        if !markedReading.isEmpty {
-            // End the old reading before inserting a selected segment. Marking the
-            // chosen text and immediately marking the remaining reading can make
-            // host fields reuse the previous range during partial selection.
-            proxy.setMarkedText("", selectedRange: NSRange(location: 0, length: 0))
-            proxy.unmarkText()
-            markedReading = ""
-        }
-        proxy.insertText(text)
+        textWriter.commit(text, in: ProxyTextDocument(proxy: textDocumentProxy))
     }
 
     private func commitPending() {
         guard composition.hasInput else { return }
-        if lexicon == nil { lexicon = Self.loadLexicon(from: lexiconURL) }
+        if lexicon == nil { lexicon = Self.loadLexicon() }
         var text = ""
         // Resolve any remaining syllables before writing to the host field.
         while composition.hasInput,
@@ -1054,13 +1048,22 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     }
 }
 
+private struct ProxyTextDocument: CompositionTextDocument {
+    let proxy: UITextDocumentProxy
+
+    func setMarkedText(_ text: String, selectedRange: NSRange) {
+        proxy.setMarkedText(text, selectedRange: selectedRange)
+    }
+
+    func unmarkText() { proxy.unmarkText() }
+    func insertText(_ text: String) { proxy.insertText(text) }
+}
+
 private final class KeyboardKeyRow: UIView {
     private let keys: [UIView]
     private let weights: [CGFloat]
     private let totalWeight: CGFloat
-    private lazy var preferredHeight = keys.reduce(CGFloat.zero) {
-        max($0, $1.intrinsicContentSize.height)
-    }
+    private let preferredHeight = KeyboardLayoutConfiguration.portrait.keyHeight
 
     init(views: [UIView], weights: [CGFloat]) {
         keys = views

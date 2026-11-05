@@ -3,6 +3,7 @@
 import argparse
 from collections import defaultdict
 from pathlib import Path
+import sqlite3
 import unicodedata
 
 
@@ -23,7 +24,6 @@ FINALS = {
     "ü": "ㄩ", "üe": "ㄩㄝ", "üan": "ㄩㄢ", "ün": "ㄩㄣ",
 }
 TONES = dict(zip("\u0304\u0301\u030c\u0300", "1234"))
-PHRASE_LIMIT = 65_000
 
 # Word readings where character-by-character inference would miss common usage.
 WORD_READINGS = {
@@ -35,6 +35,7 @@ WORD_READINGS = {
     "简体": "jiǎn tǐ", "简体中文": "jiǎn tǐ zhōng wén",
     "注音": "zhù yīn", "注音输入法": "zhù yīn shū rù fǎ",
     "输入法": "shū rù fǎ", "电脑": "diàn nǎo", "软件": "ruǎn jiàn",
+    "众筹": "zhòng chóu",
     "音乐": "yīn yuè", "快乐": "kuài lè", "银行": "yín háng",
     "长大": "zhǎng dà", "重庆": "chóng qìng",
     "有什么": "yǒu shén me", "没什么": "méi shén me",
@@ -138,6 +139,8 @@ def weighted_rows(path):
             if line.startswith("#"):
                 continue
             columns = line.rstrip().split("\t")
+            if len(columns) == 2:
+                columns.append("100")
             if len(columns) == 3 and columns[2].isdigit():
                 text, pinyin, weight = columns
                 yield text, pinyin, int(weight)
@@ -155,7 +158,7 @@ def load_phrase_tones(path):
     return readings
 
 
-def build(rime, pinyin_data, opencc, ice, phrase_data):
+def build(rime, pinyin_data, opencc, ice, phrase_data, extra_ice=()):
     tones = load_character_tones(pinyin_data)
     simplified = load_simplification(opencc)
     phrase_tones = load_phrase_tones(phrase_data)
@@ -173,15 +176,14 @@ def build(rime, pinyin_data, opencc, ice, phrase_data):
             key = (text, sound + tone)
             entries[key] = max(weight, entries.get(key, 0))
 
-    # Use the most frequent simplified phrases from Rime Ice within the keyboard's size budget.
+    # Merge all enabled tables. Query-time indexing replaces the former 65,000-reading cutoff.
     phrases = sorted(
-        (row for row in weighted_rows(ice) if len(row[0]) > 1),
+        (row for path in (ice, *extra_ice) for row in weighted_rows(path) if len(row[0]) > 1),
         key=lambda row: (-row[2], row[0], row[1]),
     )
     rejected = {(text, encode_reading(pinyin)) for text, pinyin in REJECTED_READINGS.items()}
     curated = {(text, encode_reading(pinyin)): 1_000_000_000 for text, pinyin in WORD_READINGS.items()}
     entries.update(curated)
-    added = len(curated)
     for text, pinyin, weight in phrases:
         if not all(c == "〇" or unicodedata.name(c, "").startswith("CJK UNIFIED IDEOGRAPH") for c in text):
             continue
@@ -190,22 +192,66 @@ def build(rime, pinyin_data, opencc, ice, phrase_data):
             continue
         readings = phrase_tones.get((text, sounds))
         if not readings:
-            readings = [tuple(tones.get((char, sound), ["0"])[0] for char, sound in zip(text, sounds))]
+            # Do not assert a guessed tone when the same sound has multiple character tones.
+            # Tone zero is matched as unspecified by the runtime, preserving explicit-tone lookup.
+            def inferred_tone(char, sound):
+                known = set(tones.get((char, sound), []))
+                return next(iter(known)) if len(known) == 1 else "0"
+            readings = [tuple(inferred_tone(char, sound) for char, sound in zip(text, sounds))]
         for reading in sorted(readings):
             key = (text, " ".join(sound + tone for sound, tone in zip(sounds, reading)))
             if key not in entries and key not in rejected:
                 entries[key] = weight
-                added += 1
-                if added == PHRASE_LIMIT:
-                    break
-        if added == PHRASE_LIMIT:
-            break
 
     return entries
 
 
 def encode_reading(pinyin):
     return " ".join(to_zhuyin(base) + tone for base, tone in map(split_tone, pinyin.split()))
+
+
+def encode_sound_key(sounds):
+    # One ASCII byte per Zhuyin symbol; preserves prefix lookup without duplicating UTF-8 text.
+    return " ".join("".join(chr(ord(symbol) - 0x3105 + 65) for symbol in sound) for sound in sounds)
+
+
+def write_database(entries, output):
+    """Compile an immutable SQLite dictionary; the iOS keyboard only opens it read-only."""
+    ranked = sorted(entries, key=lambda entry: (-entries[entry], *entry))
+    temporary = output.with_suffix(".building")
+    if temporary.exists():
+        temporary.unlink()
+    with sqlite3.connect(temporary) as db:
+        db.executescript("""
+            PRAGMA page_size=4096;
+            PRAGMA journal_mode=OFF;
+            PRAGMA synchronous=OFF;
+            PRAGMA user_version=1;
+            CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID;
+            CREATE TABLE entries(
+                rank INTEGER PRIMARY KEY,
+                syllables INTEGER NOT NULL,
+                sound_key TEXT NOT NULL,
+                text TEXT NOT NULL,
+                reading TEXT NOT NULL
+            );
+        """)
+        db.executemany("INSERT INTO metadata VALUES (?, ?)", [
+            ("format", "zhuyin-sqlite-1"),
+            ("entry_count", str(len(ranked))),
+            ("sources", "rime-pinyin-simp; rime-ice base/ext/tencent/others; phrase-pinyin-data; pinyin-data"),
+        ])
+        def rows():
+            for rank, (text, reading) in enumerate(ranked):
+                sounds = encode_sound_key(syllable[:-1] for syllable in reading.split())
+                yield rank, len(reading.split()), sounds, text, reading
+        db.executemany("INSERT INTO entries VALUES (?, ?, ?, ?, ?)", rows())
+        db.execute("CREATE INDEX lookup ON entries(syllables, sound_key, rank)")
+        db.execute("ANALYZE")
+        assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    db.close()
+    temporary.replace(output)
+    print(f"Wrote {len(ranked):,} readings to {output.name} ({output.stat().st_size:,} bytes)", flush=True)
 
 
 def main():
@@ -215,14 +261,12 @@ def main():
     parser.add_argument("opencc", type=Path, help="TSCharacters.txt")
     parser.add_argument("ice", type=Path, help="Rime Ice cn_dicts/base.dict.yaml")
     parser.add_argument("phrase_data", type=Path, help="phrase-pinyin-data pinyin.txt")
+    parser.add_argument("--extra-ice", type=Path, nargs="*", default=[], help="Rime Ice ext/tencent/others tables")
+    parser.add_argument("--output", type=Path, help="Output .sqlite path (default: Keyboard/Lexicon.sqlite)")
     args = parser.parse_args()
-    output = Path(__file__).resolve().parents[1] / "Keyboard" / "Lexicon.tsv"
-    entries = build(args.rime, args.pinyin_data, args.opencc, args.ice, args.phrase_data)
-    ranked = sorted(entries, key=lambda entry: (-entries[entry], *entry))
-    with output.open("w", encoding="utf-8", newline="\n") as dictionary:
-        for text, reading in ranked:
-            dictionary.write(f"{text}\t{reading}\n")
-    print(f"Wrote {len(ranked):,} readings to {output.name}")
+    output = args.output or Path(__file__).resolve().parents[1] / "Keyboard" / "Lexicon.sqlite"
+    entries = build(args.rime, args.pinyin_data, args.opencc, args.ice, args.phrase_data, args.extra_ice)
+    write_database(entries, output)
 
 
 if __name__ == "__main__":

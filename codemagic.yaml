@@ -26,6 +26,7 @@ workflows:
           test -x "$app/Zhuyin"
           test -x "$keyboard/ZhuyinKeyboard"
           test -s "$keyboard/Lexicon.tsv"
+          test -s "$keyboard/Lexicon.sqlite"
           mkdir -p build/unsigned/Payload
           ditto "$app" build/unsigned/Payload/Zhuyin.app
           ditto -c -k --norsrc --keepParent build/unsigned/Payload build/artifacts/Zhuyin-iPhone-Unsigned.ipa
@@ -78,6 +79,7 @@ workflows:
           test -x "$app/Zhuyin"
           test -x "$keyboard/ZhuyinKeyboard"
           test -s "$keyboard/Lexicon.tsv"
+          test -s "$keyboard/Lexicon.sqlite"
           ditto -c -k --keepParent "$app" build/artifacts/Zhuyin-Simulator.zip
     artifacts:
       - build/artifacts/Zhuyin-Simulator.zip

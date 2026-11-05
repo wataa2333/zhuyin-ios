@@ -30,7 +30,7 @@ struct Syllable: Sendable {
         let sameSound = allowPrefix
             ? reading.symbols.hasPrefix(symbols)
             : reading.symbols == symbols
-        return sameSound && (tone == nil || tone == reading.tone)
+        return sameSound && (tone == nil || reading.tone == nil || tone == reading.tone)
     }
 }
 
@@ -162,11 +162,13 @@ struct UserDictionary {
 }
 
 struct Lexicon: Sendable {
+    private let database: LexiconDatabase?
     private let entriesByFirstSyllable: [String: [Candidate]]
     private let singleCharactersByPrefix: [String: [Candidate]]
 
     // The bundled entries are ordered by frequency.
     init(contents: String) {
+        database = nil
         var byFirstSyllable: [String: [Candidate]] = [:]
         var singleByPrefix: [String: [Candidate]] = [:]
         for line in contents.split(whereSeparator: \.isNewline) {
@@ -185,6 +187,12 @@ struct Lexicon: Sendable {
         singleCharactersByPrefix = singleByPrefix
     }
 
+    init(databaseURL: URL) throws {
+        database = try LexiconDatabase(url: databaseURL)
+        entriesByFirstSyllable = [:]
+        singleCharactersByPrefix = [:]
+    }
+
     func candidates(for composition: Composition, learned: [Candidate] = []) -> [Candidate] {
         let input = composition.syllables
         guard let first = input.first else { return [] }
@@ -194,9 +202,10 @@ struct Lexicon: Sendable {
         var completions: [Candidate] = []
         var prefixes: [Candidate] = []
 
-        let builtIn = input.count == 1
-            ? singleCharactersByPrefix[first.symbols, default: []]
-            : entriesByFirstSyllable[first.symbols, default: []]
+        let builtIn = database?.candidates(for: input, allowLastPrefix: canCompleteLast)
+            ?? (input.count == 1
+                ? singleCharactersByPrefix[first.symbols, default: []]
+                : entriesByFirstSyllable[first.symbols, default: []])
         for entry in [learned, builtIn].joined() {
             let count = entry.reading.count
             guard count <= input.count else { continue }
@@ -231,7 +240,16 @@ struct Lexicon: Sendable {
         wordCounts[input.count] = 0
         for start in input.indices.reversed() {
             let sound = input[start].symbols
-            for word in entriesByFirstSyllable[sound, default: []] where word.syllableCount > 1 {
+            let words: [Candidate]
+            if let database, input.count - start > 1 {
+                words = (2...(input.count - start)).reversed().compactMap { count in
+                    let end = start + count
+                    return database.bestMatch(for: Array(input[start..<end]), allowLastPrefix: end == input.count)
+                }
+            } else {
+                words = entriesByFirstSyllable[sound, default: []]
+            }
+            for word in words where word.syllableCount > 1 {
                 let end = start + word.syllableCount
                 guard end <= input.count, wordCounts[end] < wordCounts[start] - 1 else { continue }
                 guard word.reading.indices.allSatisfy({ index in
@@ -262,6 +280,7 @@ struct Lexicon: Sendable {
     }
 
     private func bestCharacter(for syllable: Syllable, allowPrefix: Bool) -> Candidate? {
+        if let database { return database.bestMatch(for: [syllable], allowLastPrefix: allowPrefix) }
         let entries = singleCharactersByPrefix[syllable.symbols, default: []]
         var completion: Candidate?
         for entry in entries {

@@ -30,6 +30,7 @@ Apple 的公开接口让扩展自行绘制键盘并通过文本代理上屏。�
 | 按 ⇧，输入 `ㄚ` 后按空格 | 在韵母页输入一声并返回声母页 |
 | 定调后按退格 | 移除上一个音节的声调并回到韵母页 |
 | 输入 `ㄏㄨˋ ㄓㄠˋ`，分两次选择单字「护」「罩」 | 上屏「护罩」，不残留注音；选择「护」后，只有 `ㄓㄠˋ` 继续组字 |
+| 输入 `ㄓㄨㄥˋ ㄔㄡˊ`，选择词组或分两次选择「众」「筹」 | 上屏「众筹」，不残留拼音或注音 |
 
 输入声母或介音后自动切到韵母页，介音在两页的键位相同。按空格定一声，其他声调从韵母页输入。定调后可连续输入下一个音节，点选候选上屏。⇧ 可手动切页，便于输入韵母起头的音节。组字中的注音显示在输入框，候选栏提供简体字词，部分字词也会带出表情候选。右侧箭头可展开候选。拼音标注开关在简体注音 App 的「键盘设置」，重新打开键盘后生效。
 
@@ -41,10 +42,17 @@ Apple 的公开接口让扩展自行绘制键盘并通过文本代理上屏。�
 
 ## 词库来源
 
-`Keyboard/Lexicon.tsv` 收录 65,000 条多字词读音，优先收录人工校对的常用短语，其余按雾凇拼音基础词库的权重选取。单字来自 Rime 袖珍简化字拼音，用 OpenCC 单字表规范字形。生成时优先采用 phrase-pinyin-data 的词组读音，再用 pinyin-data 补充声调。固定版本、来源和许可证见 `Keyboard/Notices`，随扩展一起打包。
+`Keyboard/Lexicon.sqlite` 收录 898,723 条字词读音，合并雾凇拼音的基础、扩展、腾讯和其他词表，不再按 65,000 条裁剪。保留可转换为逐字注音的中文条目；混合英文、数字等条目暂不纳入。单字来自 Rime 袖珍简化字拼音，用 OpenCC 单字表规范字形。生成时优先采用 phrase-pinyin-data 的词组读音，再用 pinyin-data 补充声调；无法确定的声调用零标记，匹配时不强制该声调。固定版本、来源和许可证见 `Keyboard/Notices`，随扩展一起打包。
 
-重建词库时，准备对应版本的五个源文件，最后两个参数分别是雾凇词表和词组拼音表。
+词库在开发时预先转换、去重并建立音节索引，键盘只读打开 SQLite，按输入音节和声调取有限候选，不在启动时解析完整词表。连接的页缓存设为 512 KiB，文件映射窗口上限为 8 MiB；这不是整个键盘进程的内存上限。旧版 `Lexicon.tsv` 仅在数据库无法打开时作为应急词库。
+
+重建词库时，准备上述固定版本的源文件。
 
 ```sh
-python3 Tools/build_lexicon.py pinyin_simp.dict.yaml pinyin-data/pinyin.txt TSCharacters.txt rime-ice/cn_dicts/base.dict.yaml phrase-pinyin-data/pinyin.txt
+python3 Tools/build_lexicon.py pinyin_simp.dict.yaml pinyin-data/pinyin.txt TSCharacters.txt rime-ice/cn_dicts/base.dict.yaml phrase-pinyin-data/pinyin.txt --extra-ice rime-ice/cn_dicts/ext.dict.yaml rime-ice/cn_dicts/tencent.dict.yaml rime-ice/cn_dicts/others.dict.yaml
+python3 Tools/test_lexicon.py
 ```
+
+键盘尺寸集中在 `KeyboardLayoutConfiguration.swift`，首次显示前即使用固定尺寸，横竖屏变化时才切换配置。Spotlight 空闲状态不准备词库、韵母页和音效，首次输入按需打开预建索引。主 App 与扩展可直接离线使用，不需要复制词库到共享容器。
+
+Xcode 的 `CandidatePanelTests` scheme 包含候选切换、高度、分段上屏与词库查询回归测试。Windows 下的 Python 检查验证数据库完整性、覆盖、查询索引和只读访问；它不能替代 iOS 编译和真机手感验证。
