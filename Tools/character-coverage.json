@@ -1,0 +1,56 @@
+{
+  "standard_reference": "Rime Ice 8105.dict.yaml, section 字表; includes upstream supplemental forms, so this is not exactly the official 8105-character set",
+  "standard_characters": 8121,
+  "missing_standard_characters": [],
+  "pinyin_reference_characters": 44270,
+  "pinyin_reference_readings": 57153,
+  "missing_pinyin_characters": [],
+  "missing_pinyin_readings": [],
+  "available_characters": 44271,
+  "available_readings": 57372,
+  "pinyin_source_characters": 44269,
+  "source_characters_without_any_candidate": [],
+  "unsupported_source_readings": [
+    {
+      "character": "㕶",
+      "pinyin": "ňg"
+    },
+    {
+      "character": "哼",
+      "pinyin": "hng"
+    },
+    {
+      "character": "哽",
+      "pinyin": "ńg"
+    },
+    {
+      "character": "唔",
+      "pinyin": "ńg"
+    },
+    {
+      "character": "嗯",
+      "pinyin": "ńg"
+    },
+    {
+      "character": "嗯",
+      "pinyin": "ňg"
+    },
+    {
+      "character": "嗯",
+      "pinyin": "ǹg"
+    },
+    {
+      "character": "噷",
+      "pinyin": "hm"
+    },
+    {
+      "character": "瓲",
+      "pinyin": "túnwǎ"
+    },
+    {
+      "character": "𠮾",
+      "pinyin": "ǹg"
+    }
+  ],
+  "scope": "Convertible Mandarin readings in the pinned pinyin-data dataset plus the 8105 reference. This does not claim coverage of every Unicode Han character or every dialect reading."
+}

@@ -1,4 +1,5 @@
 import Foundation
+import CoreFoundation
 
 struct KeyFeedbackSettings: Equatable, Sendable {
     var volume: UInt8 = 40
@@ -17,6 +18,12 @@ struct KeyFeedbackSettings: Equatable, Sendable {
 }
 
 enum KeyboardPreferences {
+    static let changeNotification = "com.wataa2333.zhuyin.settings.changed"
+
+    static func notifyChanged() {
+        CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+            CFNotificationName(rawValue: changeNotification as CFString), nil, nil, true)
+    }
     private static let localPinyinKey = "showPinyinOnKeys"
     private static let localFeedbackKey = "keyFeedback"
 

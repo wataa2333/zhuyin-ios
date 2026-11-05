@@ -32,7 +32,9 @@ Apple 的公开接口让扩展自行绘制键盘并通过文本代理上屏。�
 | 输入 `ㄏㄨˋ ㄓㄠˋ`，分两次选择单字「护」「罩」 | 先显示「护ㄓㄠˋ」，最后上屏「护罩」，不残留注音 |
 | 输入 `ㄓㄨㄥˋ ㄔㄡˊ`，选择词组或分两次选择「众」「筹」 | 上屏「众筹」，不残留拼音或注音 |
 
-输入声母或介音后自动切到韵母页，介音在两页的键位相同。按空格定一声，其他声调从韵母页输入。定调后可连续输入下一个音节，点选候选上屏。⇧ 可手动切页，便于输入韵母起头的音节。组字中的注音显示在输入框，候选栏提供简体字词，部分字词也会带出表情候选。右侧箭头可展开候选。拼音标注开关在简体注音 App 的「键盘设置」，重新打开键盘后生效。
+输入声母或介音后自动切到韵母页，介音在两页的键位相同。按空格定一声，其他声调从韵母页输入。定调后可连续输入下一个音节，点选候选上屏。⇧ 可手动切页，便于输入韵母起头的音节。组字中的注音显示在输入框，候选栏提供简体字词，部分字词也会带出表情候选。右侧 64 × 44 点的箭头区域可展开候选；首行与其余候选使用同一组按钮，展开时换行移动，整个列表可上下滚动，没有单独固定的首行或边缘重复词。Spotlight 没有候选时不显示箭头和分隔线。
+
+拼音标注、按键音量和触感强度在简体注音 App 的「键盘设置」中修改；共享容器可用时通过跨进程通知立即更新，无需关闭键盘。缺少共享容器权限时仍使用同步栏。发送等操作键在可用时使用蓝底白字，空内容且宿主要求禁用时显示灰色。音频初始化、解码和播放使用后台串行队列，过时的按键音会跳过，避免阻塞触摸。
 
 手选多个字或词组时，已选汉字与剩余注音保留在同一个组字范围内；选完后才统一结束组字，避免反复结束、重开组字范围导致宿主把前面的汉字恢复成注音。删除剩余读音会保留并上屏已经选好的汉字。
 
@@ -44,14 +46,17 @@ Apple 的公开接口让扩展自行绘制键盘并通过文本代理上屏。�
 
 ## 词库来源
 
-`Keyboard/Lexicon.sqlite` 收录 898,723 条字词读音，合并雾凇拼音的基础、扩展、腾讯和其他词表，不再按 65,000 条裁剪。保留可转换为逐字注音的中文条目；混合英文、数字等条目暂不纳入。单字来自 Rime 袖珍简化字拼音，用 OpenCC 单字表规范字形。生成时优先采用 phrase-pinyin-data 的词组读音，再用 pinyin-data 补充声调；无法确定的声调用零标记，匹配时不强制该声调。固定版本、来源和许可证见 `Keyboard/Notices`，随扩展一起打包。
+`Keyboard/Lexicon.sqlite` 收录 939,625 条字词读音，合并雾凇拼音的基础、扩展、腾讯和其他词表，不再按 65,000 条裁剪。保留可转换为逐字注音的中文条目；混合英文、数字等条目暂不纳入。单字合并 Rime 袖珍简化字拼音、雾凇 8105 字表以及 pinyin-data 中所有可转换的汉字读音，用 OpenCC 补充简体形式，也保留可选的原字形，共 44,271 个单字、57,372 条单字读音。生成时优先采用 phrase-pinyin-data 的词组读音，再用 pinyin-data 补充声调；无法确定的声调用零标记，匹配时不强制该声调。固定版本、来源和许可证见 `Keyboard/Notices`，随扩展一起打包。
+
+`Tools/character-coverage.json` 是当前全量核对结果：雾凇 8105 字表的「字表」段含上游增补共 8,121 字，当前缺字为零；固定版本 pinyin-data 中可转换的字音也无遗漏。此前的缺字和缺音明细保存在 `Tools/character-coverage-before.json`。原始拼音数据所含的 44,269 个汉字均有可用读音；仍有 10 条鼻音或合音等特殊读法未映射，对应汉字可用其其他已收录读音输入，详情列在报告中。该基准不代表所有 Unicode 汉字、方言读音或 iOS 字体覆盖。
 
 词库在开发时预先转换、去重并建立音节索引，键盘只读打开 SQLite，按输入音节和声调取有限候选，不在启动时解析完整词表。连接的页缓存设为 512 KiB，文件映射窗口上限为 8 MiB；这不是整个键盘进程的内存上限。旧版 `Lexicon.tsv` 仅在数据库无法打开时作为应急词库。
 
 重建词库时，准备上述固定版本的源文件。
 
 ```sh
-python3 Tools/build_lexicon.py pinyin_simp.dict.yaml pinyin-data/pinyin.txt TSCharacters.txt rime-ice/cn_dicts/base.dict.yaml phrase-pinyin-data/pinyin.txt --extra-ice rime-ice/cn_dicts/ext.dict.yaml rime-ice/cn_dicts/tencent.dict.yaml rime-ice/cn_dicts/others.dict.yaml
+python3 Tools/build_lexicon.py pinyin_simp.dict.yaml pinyin-data/pinyin.txt TSCharacters.txt rime-ice/cn_dicts/base.dict.yaml phrase-pinyin-data/pinyin.txt --extra-ice rime-ice/cn_dicts/ext.dict.yaml rime-ice/cn_dicts/tencent.dict.yaml rime-ice/cn_dicts/others.dict.yaml --characters rime-ice/cn_dicts/8105.dict.yaml
+python3 Tools/audit_character_coverage.py Keyboard/Lexicon.sqlite pinyin-data/pinyin.txt TSCharacters.txt rime-ice/cn_dicts/8105.dict.yaml --output Tools/character-coverage.json
 python3 Tools/test_lexicon.py
 ```
 

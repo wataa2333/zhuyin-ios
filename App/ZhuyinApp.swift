@@ -81,13 +81,13 @@ private struct SetupView: View {
     private func setPinyin(_ enabled: Bool) {
         KeyboardPreferences.saveLocally(enabled)
         showsPinyin = enabled
-        isTyping = false
         guard let file = KeyboardPreferences.pinyinFile else {
             needsKeyboardSync = true
             return
         }
         let saved: Void? = try? Data([enabled ? 1 : 0]).write(to: file, options: .atomic)
         if saved == nil { needsKeyboardSync = true }
+        else { KeyboardPreferences.notifyChanged() }
     }
 
     private func saveFeedback() {
@@ -97,6 +97,7 @@ private struct SetupView: View {
             return
         }
         if (try? feedback.data.write(to: file, options: .atomic)) == nil { needsKeyboardSync = true }
+        else { KeyboardPreferences.notifyChanged() }
     }
 }
 

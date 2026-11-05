@@ -3,6 +3,7 @@ import UIKit
 struct KeyboardLayoutConfiguration: Equatable {
     static let candidateBarHeight: CGFloat = 44
     static let dividerHeight: CGFloat = 22
+    static let candidateToggleWidth: CGFloat = 64
     static let topInset: CGFloat = 1
     static let toolbarSpacing: CGFloat = 2
     static let portrait = Self(keyHeight: 42, rowSpacing: 9)

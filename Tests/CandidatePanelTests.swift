@@ -12,7 +12,7 @@ final class CandidatePanelTests: XCTestCase {
         let toggle = UIButton(type: .system)
         let panel: CandidatePanelController
 
-        init() {
+        init(keepsCandidatesVisible: Bool = false) {
             toggle.frame = CGRect(x: 338, y: 0, width: 52, height: 44)
             toggle.setImage(UIImage(systemName: "chevron.down"), for: .normal)
             let root = UIViewController()
@@ -26,7 +26,8 @@ final class CandidatePanelTests: XCTestCase {
             }
             toolbar.contentSize = CGSize(width: 600, height: 44)
             toolbar.contentOffset.x = 23 // Both edges contain a partially visible word.
-            panel = CandidatePanelController(keyboard: keyboard, candidates: candidates, toggle: toggle)
+            panel = CandidatePanelController(keyboard: keyboard, candidates: candidates, toggle: toggle,
+                                             keepsCandidatesVisible: keepsCandidatesVisible)
             panel.onToggleRequested = { [weak panel] in
                 guard let panel else { return }
                 panel.setExpanded(!panel.isExpanded)
@@ -63,6 +64,20 @@ final class CandidatePanelTests: XCTestCase {
         XCTAssertFalse(f.keyboard.isHidden)
         XCTAssertTrue(f.candidates.isHidden)
         XCTAssertEqual(f.toggle.accessibilityLabel, "展开候选字词")
+    }
+
+    func testSharedCandidateListStaysVisibleAndTouchableInBothModes() {
+        let f = Fixture(keepsCandidatesVisible: true)
+        defer { f.close() }
+        XCTAssertFalse(f.candidates.isHidden)
+        XCTAssertTrue(f.candidates.isUserInteractionEnabled)
+        f.tap()
+        f.tap()
+        finishAnimations()
+        XCTAssertFalse(f.candidates.isHidden)
+        XCTAssertEqual(f.candidates.alpha, 1)
+        XCTAssertTrue(f.candidates.isUserInteractionEnabled)
+        XCTAssertFalse(f.candidates.accessibilityElementsHidden)
     }
 
     func testTransitionActuallyAnimates() throws {

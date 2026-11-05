@@ -66,8 +66,18 @@ class DictionaryTests(unittest.TestCase):
     def test_ascii_sound_encoding_and_read_only_open(self):
         self.assertEqual(encode_sound_key(["ㄓㄨㄥ", "ㄔㄡ"]), "Oda P]")
         self.assertEqual(to_zhuyin("zhong"), "ㄓㄨㄥ")
+        self.assertEqual(to_zhuyin("wong"), "ㄨㄥ")
         with self.assertRaises(sqlite3.OperationalError):
             self.db.execute("DELETE FROM entries WHERE rank=-1")
+
+    def test_character_coverage_and_neutral_tone_ye(self):
+        count = self.db.execute("SELECT count(DISTINCT text) FROM entries WHERE syllables=1").fetchone()[0]
+        self.assertGreaterEqual(count, 44_269)
+        for char in ["吔", "㖏", "㙍", "乾"]:
+            with self.subTest(character=char):
+                self.assertIsNotNone(self.db.execute("SELECT 1 FROM entries WHERE syllables=1 AND text=? LIMIT 1", (char,)).fetchone())
+        sql, args = query(self.db, ["ㄧㄝ"], ["5"])
+        self.assertIn("吔", [row[0] for row in self.db.execute(sql, args)])
 
     def test_compiler_creates_closed_reopenable_database(self):
         import tempfile

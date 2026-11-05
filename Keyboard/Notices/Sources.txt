@@ -8,6 +8,12 @@ source files below reproduce the SQLite dictionary.
   https://github.com/iDvel/rime-ice/blob/99662ba01e3affa6a0f009174ca530b887bac3b6/cn_dicts/base.dict.yaml
 - iDvel/rime-ice, cn_dicts/ext.dict.yaml, cn_dicts/tencent.dict.yaml, cn_dicts/others.dict.yaml, GPL-3.0-only.
   https://github.com/iDvel/rime-ice/tree/99662ba01e3affa6a0f009174ca530b887bac3b6/cn_dicts
+- iDvel/rime-ice, cn_dicts/8105.dict.yaml (character coverage and supplementary readings), GPL-3.0-only.
+  https://github.com/iDvel/rime-ice/blob/99662ba01e3affa6a0f009174ca530b887bac3b6/cn_dicts/8105.dict.yaml
+- Ministry of Education Revised Mandarin Chinese Dictionary, 吔 (neutral-tone ye).
+  https://dict.revised.moe.edu.tw/dictView.jsp?ID=10807
+- Mandarin phonetic correspondence table, alternate wong -> ㄨㄥ transcription.
+  https://www.klhpd.npa.gov.tw/ch/app/data/doc?module=download&detailNo=780282106784804864&type=s
 - mozillazg/phrase-pinyin-data, pinyin.txt (phrase tone readings), MIT.
   https://github.com/mozillazg/phrase-pinyin-data/blob/4afa3226ce53c9138b939e83c3bb294dbe0da511/pinyin.txt
 - Rime pinyin_simp.dict.yaml (single characters), derived from Android Pinyin IME, Apache-2.0.

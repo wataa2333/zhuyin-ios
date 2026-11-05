@@ -1,4 +1,3 @@
-import AVFAudio
 import UIKit
 
 final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDelegate {
@@ -40,7 +39,6 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         "我", "你", "这", "那", "他", "有", "因为", "我们",
         "你好", "谢谢", "可以", "今天", "怎么", "现在", "知道", "好的"
     ]
-    private static let candidateFont = UIFont.systemFont(ofSize: 19)
     private static let candidateBarHeight = KeyboardLayoutConfiguration.candidateBarHeight
     private static let emojiByWord = [
         "想": "🤔", "下": "⬇️", "心": "❤️", "爱": "❤️", "你好": "👋", "再见": "👋",
@@ -50,6 +48,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     ]
     private var showsPinyin = KeyboardPreferences.localPinyin
     private var preferenceLoad: Task<Void, Never>?
+    private var settingsObserver: KeyboardSettingsObserver?
     private var composition = Composition()
     private var textWriter = CompositionTextWriter()
     private var updatingDocument = false
@@ -69,27 +68,25 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     private var displayedPinyin = false
     private var keyLayouts: [Page: UIStackView] = [:]
     private var returnTitle = "换行"
+    private var documentHasText = false
+    private var returnRequiresText = false
     private var isSearchField = false
     private var keyboardWarmup: Task<Void, Never>?
 
     private let rows = UIView()
     private let keyArea = UIView()
-    private let candidateScroll = CandidateScrollView()
-    private var candidateButtons: [UIButton] = []
+    private let candidateList = CandidateListView()
+    private let candidateStripSlot = UIView()
+    private let candidateDivider = UIView()
     private var displayedCandidates: [String] = []
     private var highlightsFirstCandidate = false
     private var candidateRefreshPending = false
     private let expandCandidates = UIButton(type: .system)
-    private let candidateGridScroll = CandidateScrollView()
-    private var candidateGridButtons: [UIButton] = []
     private lazy var candidatePanel = CandidatePanelController(
-        keyboard: rows, candidates: candidateGridScroll, toggle: expandCandidates
+        keyboard: rows, candidates: candidateList, toggle: expandCandidates, keepsCandidatesVisible: true
     )
     private var showsCandidatePanel: Bool { candidatePanel.isExpanded }
-    private var candidateGridNeedsLayout = true
-    private var candidateGridFirstRowBounds = CGRect.null
-    private var candidateViewportWidth: CGFloat = 0
-    private var candidateGridWidth: CGFloat = 0
+    private var candidateListHeight: NSLayoutConstraint?
     private var portraitKeyAreaHeight: NSLayoutConstraint?
     private var appliedLayout: KeyboardLayoutConfiguration?
     private let keyPreview = UILabel()
@@ -99,13 +96,12 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     private var feedback = KeyboardPreferences.localFeedback {
         didSet {
             if oldValue.haptics != feedback.haptics { keyHaptic = nil }
-            if feedback.volume == 0 { clickPlayers.values.forEach { $0.stop() } }
+            if feedback.volume == 0 { keyAudio.stop() }
         }
     }
     private var canPlayKeyFeedback = false
     private var keyHaptic: UIImpactFeedbackGenerator?
-    private var clickPlayers: [Bool: AVAudioPlayer] = [:]
-    private var attemptedClickSetup = false
+    private let keyAudio = KeyboardAudioFeedback()
 
     private var page: Page { alternatePage ?? (composition.showsFinals ? .finals : .initials) }
     private func refreshInputTraits(from proxy: UITextDocumentProxy) {
@@ -113,6 +109,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         isSearchField = returnKeyType == .search || returnKeyType == .google
             || returnKeyType == .yahoo || proxy.keyboardType == .webSearch
         returnTitle = title(for: returnKeyType)
+        returnRequiresText = returnKeyType == .send || proxy.enablesReturnKeyAutomatically == true
+        if !composition.hasInput && textWriter.markedText.isEmpty { documentHasText = proxy.hasText }
     }
 
     private func title(for returnKeyType: UIReturnKeyType?) -> String {
@@ -135,10 +133,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        candidateScroll.showsHorizontalScrollIndicator = false
-        candidateScroll.contentInsetAdjustmentBehavior = .never
-
-        let divider = UIView()
+        settingsObserver = KeyboardSettingsObserver { [weak self] in self?.reloadPreferences() }
+        let divider = candidateDivider
         divider.backgroundColor = .separator
         divider.translatesAutoresizingMaskIntoConstraints = false
         let dividerSlot = UIView()
@@ -166,7 +162,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             self.setCandidatePanelVisible(!self.showsCandidatePanel)
             self.playKeyFeedback()
         }
-        let toolbar = UIStackView(arrangedSubviews: [candidateScroll, dividerSlot, arrowSlot])
+        let toolbar = UIStackView(arrangedSubviews: [candidateStripSlot, dividerSlot, arrowSlot])
         toolbar.insetsLayoutMarginsFromSafeArea = false
         toolbar.isLayoutMarginsRelativeArrangement = true
         toolbar.layoutMargins = UIEdgeInsets(top: 0, left: sideInset, bottom: 0, right: 0)
@@ -176,22 +172,35 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         rows.translatesAutoresizingMaskIntoConstraints = false
         keyArea.addSubview(rows)
         configureDeleteHold()
-        candidateGridScroll.contentInsetAdjustmentBehavior = .never
-        candidateGridScroll.translatesAutoresizingMaskIntoConstraints = false
-        keyArea.addSubview(candidateGridScroll)
 
         let layout = UIStackView(arrangedSubviews: [toolbar, keyArea])
         layout.axis = .vertical
         layout.spacing = KeyboardLayoutConfiguration.toolbarSpacing
         layout.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(layout)
+        candidateList.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(candidateList)
+        candidateList.onSelect = { [weak self] index in self?.selectCandidate(at: index) }
+        candidatePanel.prepareTransition = { [weak self] expanded in
+            guard let self else { return }
+            if !self.view.bounds.isEmpty { self.view.layoutIfNeeded() }
+            self.candidateList.prepareTransition(expanded: expanded)
+        }
+        candidatePanel.animateTransition = { [weak self] expanded in
+            guard let self else { return }
+            self.candidateListHeight?.constant = expanded
+                ? Self.candidateBarHeight + KeyboardLayoutConfiguration.toolbarSpacing + self.keyArea.bounds.height
+                : Self.candidateBarHeight
+            self.candidateList.applyLayout()
+            if !self.view.bounds.isEmpty { self.view.layoutIfNeeded() }
+        }
         let area = view.safeAreaLayoutGuide
         NSLayoutConstraint.activate([
             layout.leadingAnchor.constraint(equalTo: area.leadingAnchor),
             layout.trailingAnchor.constraint(equalTo: area.trailingAnchor),
             layout.topAnchor.constraint(equalTo: view.topAnchor, constant: KeyboardLayoutConfiguration.topInset),
             layout.bottomAnchor.constraint(equalTo: area.bottomAnchor),
-            arrowSlot.widthAnchor.constraint(equalToConstant: 44 + sideInset),
+            arrowSlot.widthAnchor.constraint(equalToConstant: KeyboardLayoutConfiguration.candidateToggleWidth),
             expandCandidates.leadingAnchor.constraint(equalTo: arrowSlot.leadingAnchor),
             expandCandidates.trailingAnchor.constraint(equalTo: arrowSlot.trailingAnchor),
             expandCandidates.topAnchor.constraint(equalTo: arrowSlot.topAnchor),
@@ -200,11 +209,13 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             rows.trailingAnchor.constraint(equalTo: keyArea.trailingAnchor, constant: -sideInset),
             rows.topAnchor.constraint(equalTo: keyArea.topAnchor),
             rows.bottomAnchor.constraint(equalTo: keyArea.bottomAnchor),
-            candidateGridScroll.leadingAnchor.constraint(equalTo: rows.leadingAnchor),
-            candidateGridScroll.trailingAnchor.constraint(equalTo: rows.trailingAnchor),
-            candidateGridScroll.topAnchor.constraint(equalTo: keyArea.topAnchor),
-            candidateGridScroll.bottomAnchor.constraint(equalTo: keyArea.bottomAnchor)
+            candidateList.leadingAnchor.constraint(equalTo: rows.leadingAnchor),
+            candidateList.trailingAnchor.constraint(equalTo: rows.trailingAnchor),
+            candidateList.topAnchor.constraint(equalTo: toolbar.topAnchor)
         ])
+        let listHeight = candidateList.heightAnchor.constraint(equalToConstant: Self.candidateBarHeight)
+        listHeight.isActive = true
+        candidateListHeight = listHeight
         let height = keyArea.heightAnchor.constraint(
             equalToConstant: KeyboardLayoutConfiguration.portrait.keyAreaHeight
         )
@@ -239,9 +250,16 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             guard !Task.isCancelled else { return }
             self.hapticGenerator()?.prepare()
             self.prepareClickPlayers()
-            self.clickPlayers.values.forEach { _ = $0.prepareToPlay() }
         }
 
+        reloadPreferences()
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !self.isSearchField, self.synchronizeSettings() else { return }
+            self.updateKeys()
+        }
+    }
+
+    private func reloadPreferences() {
         preferenceLoad?.cancel()
         let previousFeedback = feedback
         let reading = Task.detached(priority: .utility) {
@@ -259,10 +277,6 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             self.showsPinyin = enabled
             self.updateKeys()
         }
-        DispatchQueue.main.async { [weak self] in
-            guard let self, !self.isSearchField, self.synchronizeSettings() else { return }
-            self.updateKeys()
-        }
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -274,8 +288,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         super.viewDidDisappear(animated)
         keyboardWarmup?.cancel()
         preferenceLoad?.cancel()
-        clickPlayers.values.forEach { $0.stop() }
-        if clickPlayers.isEmpty { attemptedClickSetup = false }
+        keyAudio.stop()
         composition = Composition()
         textWriter.reset()
         selectedSegments.removeAll()
@@ -293,14 +306,12 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        let viewport = candidateScroll.bounds.width
-        let gridWidth = candidateGridScroll.bounds.width
-        if viewport != candidateViewportWidth || gridWidth != candidateGridWidth {
-            candidateViewportWidth = viewport
-            candidateGridWidth = gridWidth
-            candidateGridNeedsLayout = true
-            refreshCandidatePanel()
+        candidateList.updateViewport(firstRowWidth: candidateStripSlot.bounds.width)
+        if showsCandidatePanel {
+            let height = Self.candidateBarHeight + KeyboardLayoutConfiguration.toolbarSpacing + keyArea.bounds.height
+            if candidateListHeight?.constant != height { candidateListHeight?.constant = height }
         }
+        updateCandidateArrow()
     }
 
     private func updatePreferredKeyAreaHeight() {
@@ -359,6 +370,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             alternatePage = nil
             setCandidatePanelVisible(false, animated: false)
             documentIdentifier = identifier
+            documentHasText = proxy.hasText
         }
         if !isSearchField, changed || reloadCandidates { _ = synchronizeSettings() }
         updateKeys()
@@ -430,149 +442,40 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     }
 
     private func updateCandidateBar() {
-        candidateGridNeedsLayout = true
-        var x: CGFloat = 0
-        for (index, button) in candidateButtons.enumerated() {
-            if index >= candidates.count { button.isHidden = true }
-        }
-        for index in candidates.indices {
-            if index == candidateButtons.count {
-                let button = candidateButton()
-                candidateButtons.append(button)
-                candidateScroll.addSubview(button)
-            }
-            let button = candidateButtons[index]
-            let width = candidateWidth(at: index)
-            configureCandidateButton(button, at: index)
-            button.frame = CGRect(x: x, y: 0, width: width, height: Self.candidateBarHeight - 4)
-            button.isHidden = false
-            x += width + 1
-        }
-        candidateScroll.contentSize = CGSize(width: max(0, x - 1), height: Self.candidateBarHeight)
-        candidateScroll.setContentOffset(.zero, animated: false)
-        refreshCandidatePanel()
+        candidatePanel.setExpanded(showsCandidatePanel, animated: false)
+        candidateList.update(titles: candidates.map(\.text), highlightsFirst: highlightsFirstCandidate)
+        if showsCandidatePanel && !candidateList.hasOverflow { setCandidatePanelVisible(false) }
+        updateCandidateArrow()
     }
 
-    private func candidateWidth(at index: Int) -> CGFloat {
-        let text = candidates[index].text as NSString
-        return max(38, ceil(text.size(withAttributes: [.font: Self.candidateFont]).width) + 12)
-    }
-
-    private func candidateButton() -> UIButton {
-        let button = UIButton(type: .system)
-        var configuration = UIButton.Configuration.plain()
-        let font = Self.candidateFont
-        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
-            var attributes = attributes
-            attributes.font = font
-            return attributes
-        }
-        configuration.baseForegroundColor = .label
-        configuration.buttonSize = .small
-        configuration.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 6, bottom: 0, trailing: 6)
-        button.configuration = configuration
-        button.titleLabel?.lineBreakMode = .byTruncatingTail
-        button.addTarget(self, action: #selector(selectCandidate(_:)), for: .touchUpInside)
-        return button
-    }
-
-    private func configureCandidateButton(_ button: UIButton, at index: Int) {
-        guard var configuration = button.configuration else { return }
-        configuration.title = candidates[index].text
-        configuration.background.backgroundColor = index == 0 && composition.hasInput
-            ? .secondarySystemGroupedBackground : .clear
-        button.configuration = configuration
-        button.tag = index
-    }
-
-    @objc private func selectCandidate(_ button: UIButton) {
-        guard candidates.indices.contains(button.tag) else { return }
-        let selected = candidates[button.tag]
+    private func selectCandidate(at index: Int) {
+        guard candidates.indices.contains(index) else { return }
+        let selected = candidates[index]
         if candidateRefreshPending {
-            // Preserve the tapped word across refreshes instead of using a possibly changed button tag.
             renderCandidates()
             guard candidates.contains(where: {
                 $0.text == selected.text && $0.readingCode == selected.readingCode && $0.isEmoji == selected.isEmoji
             }) else { return }
         }
-        playKeyFeedback()
         choose(selected)
-    }
-
-    private var hasMoreCandidates: Bool {
-        candidateScroll.bounds.width > 0
-            && candidateScroll.contentSize.width > candidateScroll.bounds.width + 0.5
+        playKeyFeedback()
     }
 
     private func updateCandidateArrow() {
-        expandCandidates.isHidden = !showsCandidatePanel && !hasMoreCandidates
-    }
-
-    private func refreshCandidatePanel() {
-        if showsCandidatePanel, candidateScroll.bounds.width > 0, !hasMoreCandidates {
-            setCandidatePanelVisible(false)
-        } else {
-            updateCandidateArrow()
-            if showsCandidatePanel { updateCandidateGrid() }
-        }
+        let hidden = !showsCandidatePanel && !candidateList.hasOverflow
+        expandCandidates.isHidden = hidden
+        candidateDivider.isHidden = hidden
     }
 
     private func setCandidatePanelVisible(_ visible: Bool, animated: Bool = true) {
-        if visible, !hasMoreCandidates { return }
-        if visible, !showsCandidatePanel {
+        if visible && !candidateList.hasOverflow { return }
+        if visible {
             stopDeleteHold()
             keyPreview.isHidden = true
             previewKey = nil
-            let maxOffset = max(0, candidateScroll.contentSize.width - candidateScroll.bounds.width)
-            let offset = min(max(0, candidateScroll.contentOffset.x), maxOffset)
-            candidateScroll.isScrollEnabled = false
-            candidateScroll.setContentOffset(CGPoint(x: offset, y: 0), animated: false)
-            updateCandidateGrid()
-            candidateGridScroll.setContentOffset(.zero, animated: false)
         }
-        candidateScroll.isScrollEnabled = !visible
         candidatePanel.setExpanded(visible, animated: animated)
         updateCandidateArrow()
-    }
-
-    private func updateCandidateGrid() {
-        let availableWidth = candidateGridScroll.bounds.width
-        guard availableWidth > 0 else { return }
-        let viewport = candidateScroll.bounds.insetBy(dx: -0.5, dy: 0)
-        guard candidateGridNeedsLayout || candidateGridFirstRowBounds != viewport else { return }
-        candidateGridNeedsLayout = false
-        candidateGridFirstRowBounds = viewport
-        let spacing: CGFloat = 4
-        let rowHeight: CGFloat = 38
-        var x: CGFloat = 0
-        var y: CGFloat = 0
-        var buttonCount = 0
-
-        for index in candidates.indices {
-            // The toolbar is identical in both states, including partially clipped words.
-            // Repeat a clipped word below so its full title remains accessible.
-            let inFirstRow = viewport.contains(candidateButtons[index].frame)
-            if inFirstRow { continue }
-
-            let width = min(availableWidth, candidateButtons[index].frame.width)
-            if x > 0, x + width > availableWidth {
-                x = 0
-                y += rowHeight + spacing
-            }
-            if buttonCount == candidateGridButtons.count {
-                let button = candidateButton()
-                candidateGridButtons.append(button)
-                candidateGridScroll.addSubview(button)
-            }
-            let button = candidateGridButtons[buttonCount]
-            configureCandidateButton(button, at: index)
-            button.frame = CGRect(x: x, y: y, width: width, height: rowHeight)
-            button.isHidden = false
-            buttonCount += 1
-            x += width + spacing
-        }
-        for button in candidateGridButtons.dropFirst(buttonCount) { button.isHidden = true }
-        candidateGridScroll.contentSize = CGSize(width: availableWidth, height: buttonCount > 0 ? y + rowHeight : 0)
     }
 
     private func updateKeys() {
@@ -596,6 +499,18 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             }
         }
         showKeyPage()
+        updateReturnKeyAppearance()
+    }
+
+    private func updateReturnKeyAppearance() {
+        let enabled = !returnRequiresText || documentHasText || composition.hasInput || !textWriter.selectedText.isEmpty
+        for layout in keyLayouts.values {
+            for case let row as KeyboardKeyRow in layout.arrangedSubviews {
+                for case let button as KeyboardButton in row.subviews where button.isReturnKey {
+                    button.applyReturnAppearance(action: returnTitle != "换行", enabled: enabled)
+                }
+            }
+        }
     }
 
     private func showKeyPage() {
@@ -711,7 +626,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         symbols.map { symbol in
             Key(String(symbol)) { [weak self] in
                 self?.commitPending()
-                self?.textDocumentProxy.insertText(String(symbol))
+                self?.insertLiteralText(String(symbol))
             }
         }
     }
@@ -723,6 +638,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
                 element = UIView()
             } else {
                 let button = KeyboardButton(type: .system)
+                button.isReturnKey = key.accessibilityLabel == returnTitle
                 button.accessibilityLabel = key.accessibilityLabel ?? key.title
                 button.backgroundColor = UIColor { traits in
                     if #available(iOS 26.0, *) {
@@ -836,31 +752,13 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     }
 
     private func prepareClickPlayers() {
-        guard canPlayKeyFeedback, feedback.volume > 0, !attemptedClickSetup else { return }
-        attemptedClickSetup = true
-        do {
-            try AVAudioSession.sharedInstance().setCategory(.ambient)
-        } catch {
-            return
-        }
-        let bundle = Bundle(for: KeyboardViewController.self)
-        for (deleting, name) in [(false, "tap"), (true, "delete")] {
-            guard let url = bundle.url(forResource: name, withExtension: "wav", subdirectory: "KeySounds"),
-                  let player = try? AVAudioPlayer(contentsOf: url) else { continue }
-            clickPlayers[deleting] = player
-        }
+        guard canPlayKeyFeedback, feedback.volume > 0 else { return }
+        keyAudio.prepare()
     }
 
     private func playKeyFeedback(at location: CGPoint? = nil, deleting: Bool = false) {
         guard canPlayKeyFeedback else { return }
-        if feedback.volume > 0 {
-            prepareClickPlayers()
-            if let player = clickPlayers[deleting] {
-                player.volume = Float(feedback.volume) / 100
-                player.currentTime = 0
-                player.play()
-            }
-        }
+        if feedback.volume > 0 { keyAudio.play(volume: feedback.volume, deleting: deleting) }
         if let keyHaptic = hapticGenerator() {
             if #available(iOS 17.5, *), let location {
                 keyHaptic.impactOccurred(at: location)
@@ -962,7 +860,9 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             updateComposition()
         } else {
             textDocumentProxy.deleteBackward()
+            documentHasText = textDocumentProxy.hasText
         }
+        updateReturnKeyAppearance()
     }
 
     private func space() {
@@ -972,11 +872,18 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         } else if composition.hasInput {
             commitPending()
         } else {
-            textDocumentProxy.insertText(" ")
+            insertLiteralText(" ")
         }
     }
 
+    private func insertLiteralText(_ text: String) {
+        textDocumentProxy.insertText(text)
+        if !text.isEmpty { documentHasText = true }
+        updateReturnKeyAppearance()
+    }
+
     private func enter() {
+        guard !returnRequiresText || documentHasText || composition.hasInput || !textWriter.selectedText.isEmpty else { return }
         if composition.hasInput {
             commitPending()
         } else {
@@ -997,6 +904,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         defer { updatingDocument = false }
         textWriter.select(text, remainingReading: composition.display,
                           in: ProxyTextDocument(proxy: textDocumentProxy))
+        if !composition.hasInput && !text.isEmpty { documentHasText = true }
     }
 
     private func consumeSelection(_ candidate: Candidate) {
@@ -1023,7 +931,10 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         if composition.hasInput { prepareLexicon() }
         updatingDocument = true
         defer { updatingDocument = false }
+        let commitsPrefix = !composition.hasInput && !textWriter.selectedText.isEmpty
         textWriter.update(composition.display, in: ProxyTextDocument(proxy: textDocumentProxy))
+        if commitsPrefix { documentHasText = true }
+        updateReturnKeyAppearance()
         scheduleCandidateRefresh()
     }
 
@@ -1031,6 +942,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         updatingDocument = true
         defer { updatingDocument = false }
         textWriter.commit(text, in: ProxyTextDocument(proxy: textDocumentProxy))
+        if !text.isEmpty { documentHasText = true }
+        updateReturnKeyAppearance()
     }
 
     private func commitPending() {
@@ -1103,23 +1016,24 @@ private final class KeyboardKeyRow: UIView {
     }
 }
 
-private final class CandidateScrollView: UIScrollView {
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        delaysContentTouches = false
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override func touchesShouldCancel(in view: UIView) -> Bool {
-        // Buttons react immediately, but dragging still takes over to scroll the candidates.
-        view is UIButton || super.touchesShouldCancel(in: view)
-    }
-}
-
 private final class KeyboardButton: UIButton {
+    var isReturnKey = false
+    private var returnAppearance: Int?
+    private var returnBackground: UIColor?
+
+    func applyReturnAppearance(action: Bool, enabled: Bool) {
+        let state = (action ? 2 : 0) + (enabled ? 1 : 0)
+        guard returnAppearance != state else { return }
+        if returnAppearance == nil { returnBackground = backgroundColor }
+        returnAppearance = state
+        isEnabled = enabled
+        backgroundColor = action && enabled ? .systemBlue : (enabled ? returnBackground : .systemGray4)
+        let foreground: UIColor = action && enabled ? .white : (enabled ? .label : .secondaryLabel)
+        setTitleColor(foreground, for: .normal)
+        setTitleColor(.secondaryLabel, for: .disabled)
+        tintColor = foreground
+    }
+
     var previewTitle: String?
     var pinyin: String?
     var activatesOnTouchDown = false

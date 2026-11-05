@@ -24,6 +24,7 @@ FINALS = {
     "ü": "ㄩ", "üe": "ㄩㄝ", "üan": "ㄩㄢ", "ün": "ㄩㄣ",
 }
 TONES = dict(zip("\u0304\u0301\u030c\u0300", "1234"))
+CHARACTER_READINGS = {"吔": "ye"}  # MOE dictionary: neutral-tone interjection, in addition to source readings.
 
 # Word readings where character-by-character inference would miss common usage.
 WORD_READINGS = {
@@ -94,6 +95,8 @@ def to_zhuyin(pinyin):
         return FINALS.get(final)
     if pinyin.startswith("w"):
         final = pinyin[1:]
+        if final == "ong":
+            final = "ueng"  # Alternate transcription found in pinyin-data; equivalent to ㄨㄥ.
         return FINALS.get(final if final.startswith("u") else "u" + final)
 
     initial = next((prefix for prefix in (pinyin[:2], pinyin[:1]) if prefix in INITIALS), "")
@@ -158,7 +161,7 @@ def load_phrase_tones(path):
     return readings
 
 
-def build(rime, pinyin_data, opencc, ice, phrase_data, extra_ice=()):
+def build(rime, pinyin_data, opencc, ice, phrase_data, extra_ice=(), extra_characters=None):
     tones = load_character_tones(pinyin_data)
     simplified = load_simplification(opencc)
     phrase_tones = load_phrase_tones(phrase_data)
@@ -175,6 +178,24 @@ def build(rime, pinyin_data, opencc, ice, phrase_data, extra_ice=()):
         for tone in tones.get((original, sound)) or tones.get((text, sound)) or ["0"]:
             key = (text, sound + tone)
             entries[key] = max(weight, entries.get(key, 0))
+
+    # Keep every convertible character reading, including rare characters omitted by pinyin_simp.
+    # Original forms remain selectable; simplified forms retain their established higher rankings.
+    for (original, sound), readings in tones.items():
+        if original != "〇" and not unicodedata.name(original, "").startswith("CJK UNIFIED IDEOGRAPH"):
+            continue
+        for text in {original, original.translate(simplified)}:
+            for tone in readings:
+                entries.setdefault((text, sound + tone), 1)
+    if extra_characters:
+        for original, pinyin, weight in weighted_rows(extra_characters):
+            sound = to_zhuyin(pinyin)
+            if len(original) != 1 or not sound:
+                continue
+            for tone in tones.get((original, sound), ["0"]):
+                entries.setdefault((original, sound + tone), weight)
+    for text, pinyin in CHARACTER_READINGS.items():
+        entries.setdefault((text, encode_reading(pinyin)), 100)
 
     # Merge all enabled tables. Query-time indexing replaces the former 65,000-reading cutoff.
     phrases = sorted(
@@ -239,7 +260,7 @@ def write_database(entries, output):
         db.executemany("INSERT INTO metadata VALUES (?, ?)", [
             ("format", "zhuyin-sqlite-1"),
             ("entry_count", str(len(ranked))),
-            ("sources", "rime-pinyin-simp; rime-ice base/ext/tencent/others; phrase-pinyin-data; pinyin-data"),
+            ("sources", "rime-pinyin-simp; rime-ice 8105/base/ext/tencent/others; phrase-pinyin-data; pinyin-data"),
         ])
         def rows():
             for rank, (text, reading) in enumerate(ranked):
@@ -262,10 +283,11 @@ def main():
     parser.add_argument("ice", type=Path, help="Rime Ice cn_dicts/base.dict.yaml")
     parser.add_argument("phrase_data", type=Path, help="phrase-pinyin-data pinyin.txt")
     parser.add_argument("--extra-ice", type=Path, nargs="*", default=[], help="Rime Ice ext/tencent/others tables")
+    parser.add_argument("--characters", type=Path, help="Rime Ice 8105 character table")
     parser.add_argument("--output", type=Path, help="Output .sqlite path (default: Keyboard/Lexicon.sqlite)")
     args = parser.parse_args()
     output = args.output or Path(__file__).resolve().parents[1] / "Keyboard" / "Lexicon.sqlite"
-    entries = build(args.rime, args.pinyin_data, args.opencc, args.ice, args.phrase_data, args.extra_ice)
+    entries = build(args.rime, args.pinyin_data, args.opencc, args.ice, args.phrase_data, args.extra_ice, args.characters)
     write_database(entries, output)
 
 
