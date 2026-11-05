@@ -78,16 +78,17 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
 
     private let rows = UIView()
     private let keyArea = UIView()
-    private let candidateScroll = UIScrollView()
+    private let candidateScroll = CandidateScrollView()
     private var candidateButtons: [UIButton] = []
     private var displayedCandidates: [String] = []
     private var highlightsFirstCandidate = false
     private var candidateRefreshPending = false
     private let expandCandidates = CandidateToggleButton(type: .system)
-    private let candidateGridScroll = UIScrollView()
+    private let candidateGridScroll = CandidateScrollView()
     private var candidateGridButtons: [UIButton] = []
     private var showsCandidatePanel = false
-    private var candidateTransition = 0
+    private var candidateGridNeedsLayout = true
+    private var candidateGridFirstRowBounds = CGRect.null
     private var candidateViewportWidth: CGFloat = 0
     private var candidateGridWidth: CGFloat = 0
     private var portraitKeyAreaHeight: NSLayoutConstraint?
@@ -150,10 +151,9 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         expandCandidates.configuration = arrowConfiguration
         expandCandidates.addAction(UIAction { [weak self] _ in
             guard let self else { return }
-            if self.candidateRefreshPending { self.renderCandidates() }
             guard !self.expandCandidates.isHidden else { return }
+            self.setCandidatePanelVisible(!self.showsCandidatePanel)
             self.playKeyFeedback()
-            self.setCandidatePanelVisible(!self.showsCandidatePanel, animated: true)
         }, for: .touchDown)
         let toolbar = UIStackView(arrangedSubviews: [candidateScroll, divider, arrowSlot])
         toolbar.insetsLayoutMarginsFromSafeArea = false
@@ -288,6 +288,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         if viewport != candidateViewportWidth || gridWidth != candidateGridWidth {
             candidateViewportWidth = viewport
             candidateGridWidth = gridWidth
+            candidateGridNeedsLayout = true
             refreshCandidatePanel()
         }
     }
@@ -411,6 +412,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     }
 
     private func updateCandidateBar() {
+        candidateGridNeedsLayout = true
         var x: CGFloat = 0
         for (index, button) in candidateButtons.enumerated() {
             if index >= candidates.count { button.isHidden = true }
@@ -431,10 +433,6 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         candidateScroll.contentSize = CGSize(width: max(0, x - 1), height: Self.candidateBarHeight)
         candidateScroll.setContentOffset(.zero, animated: false)
         refreshCandidatePanel()
-        if !showsCandidatePanel {
-            // A selection may refresh the first row while the old grid is fading out.
-            candidateGridScroll.isHidden = true
-        }
     }
 
     private func candidateWidth(at index: Int) -> CGFloat {
@@ -470,9 +468,17 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     }
 
     @objc private func selectCandidate(_ button: UIButton) {
-        guard !candidateRefreshPending, candidates.indices.contains(button.tag) else { return }
+        guard candidates.indices.contains(button.tag) else { return }
+        let selected = candidates[button.tag]
+        if candidateRefreshPending {
+            // Preserve the tapped word across refreshes instead of using a possibly changed button tag.
+            renderCandidates()
+            guard candidates.contains(where: {
+                $0.text == selected.text && $0.readingCode == selected.readingCode && $0.isEmoji == selected.isEmoji
+            }) else { return }
+        }
         playKeyFeedback()
-        choose(candidates[button.tag])
+        choose(selected)
     }
 
     private var hasMoreCandidates: Bool {
@@ -493,14 +499,10 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         }
     }
 
-    private func setCandidatePanelVisible(_ visible: Bool, animated: Bool = false) {
+    private func setCandidatePanelVisible(_ visible: Bool) {
         if visible, !hasMoreCandidates { return }
         if visible { stopDeleteHold() }
-        let changed = showsCandidatePanel != visible
-        guard changed || !animated else { return }
         showsCandidatePanel = visible
-        candidateTransition += 1
-        let transition = candidateTransition
         let image = UIImage(systemName: visible ? "chevron.up" : "chevron.down",
                             withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .medium))
         var arrowConfiguration = expandCandidates.configuration
@@ -516,32 +518,11 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             updateCandidateGrid()
             candidateGridScroll.setContentOffset(.zero, animated: false)
         }
-        guard changed, animated, !UIAccessibility.isReduceMotionEnabled, keyArea.bounds.height > 0 else {
-            rows.layer.removeAllAnimations()
-            candidateGridScroll.layer.removeAllAnimations()
-            finishCandidateTransition(showingCandidates: visible)
-            return
-        }
-
-        // The first row and arrow stay put; only the content below them changes.
-        rows.isHidden = false
-        candidateGridScroll.isHidden = false
-        rows.isUserInteractionEnabled = false
-        candidateGridScroll.isUserInteractionEnabled = false
-        rows.accessibilityElementsHidden = true
-        candidateGridScroll.accessibilityElementsHidden = true
-        UIView.animate(withDuration: 0.20, delay: 0,
-                       options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseInOut]) {
-            self.rows.transform = visible ? CGAffineTransform(translationX: 0, y: 22) : .identity
-            self.rows.alpha = visible ? 0 : 1
-            self.candidateGridScroll.alpha = visible ? 1 : 0
-        } completion: { [weak self] _ in
-            guard let self, self.candidateTransition == transition else { return }
-            self.finishCandidateTransition(showingCandidates: visible)
-        }
+        // Switch immediately: a transition must not leave either surface unable to accept taps.
+        applyCandidatePanelVisibility(showingCandidates: visible)
     }
 
-    private func finishCandidateTransition(showingCandidates: Bool) {
+    private func applyCandidatePanelVisibility(showingCandidates: Bool) {
         candidateScroll.isScrollEnabled = !showingCandidates
         if !showingCandidates {
             for index in candidates.indices { candidateButtons[index].isHidden = false }
@@ -549,18 +530,24 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         rows.isHidden = showingCandidates
         rows.isUserInteractionEnabled = !showingCandidates
         rows.accessibilityElementsHidden = showingCandidates
-        rows.transform = showingCandidates ? CGAffineTransform(translationX: 0, y: 22) : .identity
-        rows.alpha = showingCandidates ? 0 : 1
         candidateGridScroll.isHidden = !showingCandidates
         candidateGridScroll.isUserInteractionEnabled = showingCandidates
         candidateGridScroll.accessibilityElementsHidden = !showingCandidates
-        candidateGridScroll.alpha = showingCandidates ? 1 : 0
     }
 
     private func updateCandidateGrid() {
         let availableWidth = candidateGridScroll.bounds.width
         guard availableWidth > 0 else { return }
         let viewport = candidateScroll.bounds.insetBy(dx: -0.5, dy: 0)
+        guard candidateGridNeedsLayout || candidateGridFirstRowBounds != viewport else {
+            // Collapsing restores the toolbar buttons; reapply the cached first-row mask.
+            for button in candidateButtons.prefix(candidates.count) {
+                button.isHidden = !viewport.contains(button.frame)
+            }
+            return
+        }
+        candidateGridNeedsLayout = false
+        candidateGridFirstRowBounds = viewport
         let spacing: CGFloat = 4
         let rowHeight: CGFloat = 38
         var x: CGFloat = 0
@@ -1006,7 +993,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     private func choose(_ candidate: Candidate) {
         consumeSelection(candidate)
         if !candidate.isEmoji, !candidate.reading.isEmpty { userDictionary.save() }
-        setCandidatePanelVisible(false, animated: true)
+        setCandidatePanelVisible(false)
         commit(candidate.text)
         updateComposition()
     }
@@ -1080,7 +1067,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             composition = Composition()
             selectedSegments.removeAll()
         }
-        setCandidatePanelVisible(false, animated: true)
+        setCandidatePanelVisible(false)
         commit(text)
         render()
     }
@@ -1122,6 +1109,22 @@ private final class KeyboardKeyRow: UIView {
             key.frame = CGRect(x: x, y: bounds.minY, width: width, height: bounds.height)
             offset += width + spacing
         }
+    }
+}
+
+private final class CandidateScrollView: UIScrollView {
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        delaysContentTouches = false
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func touchesShouldCancel(in view: UIView) -> Bool {
+        // Buttons react immediately, but dragging still takes over to scroll the candidates.
+        view is UIButton || super.touchesShouldCancel(in: view)
     }
 }
 
