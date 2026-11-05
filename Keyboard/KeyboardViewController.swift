@@ -1050,12 +1050,18 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     }
 
     private func commit(_ text: String) {
-        if markedReading.isEmpty {
-            textDocumentProxy.insertText(text)
-        } else {
+        updatingDocument = true
+        defer { updatingDocument = false }
+        let proxy = textDocumentProxy
+        if !markedReading.isEmpty {
+            // End the old reading before inserting a selected segment. Marking the
+            // chosen text and immediately marking the remaining reading can make
+            // host fields reuse the previous range during partial selection.
+            proxy.setMarkedText("", selectedRange: NSRange(location: 0, length: 0))
+            proxy.unmarkText()
             markedReading = ""
-            setMarkedText(text, keepMarked: false)
         }
+        proxy.insertText(text)
     }
 
     private func commitPending() {
