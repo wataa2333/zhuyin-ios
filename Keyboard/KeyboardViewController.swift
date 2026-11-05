@@ -81,7 +81,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     private var displayedCandidates: [String] = []
     private var highlightsFirstCandidate = false
     private var candidateRefreshPending = false
-    private let expandCandidates = UIButton(type: .system)
+    private let expandCandidates = NearbyTouchButton(type: .system)
     private lazy var candidatePanel = CandidatePanelController(
         keyboard: rows, candidates: candidateList, toggle: expandCandidates, keepsCandidatesVisible: true
     )
@@ -133,6 +133,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        (inputView as? KeyboardInputView)?.nearbyTouchTarget = expandCandidates
         settingsObserver = KeyboardSettingsObserver { [weak self] in self?.reloadPreferences() }
         let divider = candidateDivider
         divider.backgroundColor = .separator
