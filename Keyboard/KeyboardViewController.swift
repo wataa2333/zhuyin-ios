@@ -988,8 +988,15 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         consumeSelection(candidate)
         if !candidate.isEmoji, !candidate.reading.isEmpty { userDictionary.save() }
         setCandidatePanelVisible(false)
-        commit(candidate.text)
+        writeSelectedText(candidate.text)
         updateComposition()
+    }
+
+    private func writeSelectedText(_ text: String) {
+        updatingDocument = true
+        defer { updatingDocument = false }
+        textWriter.select(text, remainingReading: composition.display,
+                          in: ProxyTextDocument(proxy: textDocumentProxy))
     }
 
     private func consumeSelection(_ candidate: Candidate) {
@@ -1015,8 +1022,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         showKeyPage()
         if composition.hasInput { prepareLexicon() }
         updatingDocument = true
+        defer { updatingDocument = false }
         textWriter.update(composition.display, in: ProxyTextDocument(proxy: textDocumentProxy))
-        updatingDocument = false
         scheduleCandidateRefresh()
     }
 
