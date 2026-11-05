@@ -37,6 +37,8 @@ final class LexiconDatabase: @unchecked Sendable {
 
     deinit { sqlite3_close(connection) }
 
+    func releaseUnusedMemory() { _ = sqlite3_db_release_memory(connection) }
+
     func lookup(_ input: [Syllable], match: Match = .exact, limit: Int) -> [Entry] {
         guard !input.isEmpty, limit > 0 else { return [] }
         let sound = Self.soundKey(for: input)

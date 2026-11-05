@@ -25,6 +25,12 @@ final class ZhuyinEngineTests: XCTestCase {
         }
     }
 
+    func testReadOnlyDictionaryStillWorksAfterMemoryPressureCacheRelease() throws {
+        let lexicon = try bundledLexicon()
+        lexicon.releaseUnusedMemory()
+        XCTAssertEqual(lexicon.candidates(for: zhongchou(tones: true)).first?.text, "众筹")
+    }
+
     func testCrowdfundingCompletesLastSyllableAndStillAllowsPartialSelection() throws {
         let lexicon = try bundledLexicon()
         XCTAssertTrue(lexicon.candidates(for: zhongchou(tones: true, incompleteLast: true))

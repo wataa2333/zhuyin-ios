@@ -54,4 +54,28 @@ final class CandidateListTests: XCTestCase {
         XCTAssertTrue(list.touchesShouldCancel(in: UIButton(type: .system)))
         XCTAssertTrue(list.touchesShouldCancel(in: UILabel()))
     }
+
+    func testCandidatePressHasAVisibleCellBackgroundAndCancellationClearsIt() {
+        let list = makeList()
+        let buttons = list.subviews.compactMap { $0 as? CandidateButton }
+        let button = buttons[1]
+        button.isHighlighted = true
+        XCTAssertTrue(button.backgroundColor?.isEqual(UIColor.systemGray3) == true)
+        button.cancelTracking(with: nil)
+        XCTAssertFalse(button.isHighlighted)
+        XCTAssertTrue(button.backgroundColor?.isEqual(UIColor.clear) == true)
+        let first = buttons[0]
+        first.isHighlighted = true
+        first.cancelTracking(with: nil)
+        XCTAssertTrue(first.backgroundColor?.isEqual(UIColor.secondarySystemGroupedBackground) == true)
+    }
+
+    func testReleasedCandidateCacheCanBeRebuiltWithoutStaleButtons() {
+        let list = makeList()
+        list.releaseCachedContent()
+        XCTAssertEqual(list.subviews.compactMap { $0 as? UIButton }.count, 0)
+        list.update(titles: ["你", "好"], highlightsFirst: false)
+        XCTAssertEqual(list.subviews.compactMap { $0 as? UIButton }.count, 2)
+        XCTAssertEqual(list.subviews.compactMap { ($0 as? UIButton)?.currentTitle }, ["你", "好"])
+    }
 }

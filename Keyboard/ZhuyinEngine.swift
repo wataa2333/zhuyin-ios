@@ -166,6 +166,8 @@ struct Lexicon: Sendable {
     private let entriesByFirstSyllable: [String: [Candidate]]
     private let singleCharactersByPrefix: [String: [Candidate]]
 
+    func releaseUnusedMemory() { database?.releaseUnusedMemory() }
+
     // The bundled entries are ordered by frequency.
     init(contents: String) {
         database = nil

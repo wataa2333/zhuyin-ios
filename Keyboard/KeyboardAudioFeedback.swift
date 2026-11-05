@@ -24,6 +24,14 @@ final class KeyboardAudioFeedback: @unchecked Sendable {
 
     func stop() { queue.async { self.players.values.forEach { $0.stop() } } }
 
+    func releaseResources() {
+        queue.async {
+            self.players.values.forEach { $0.stop() }
+            self.players.removeAll()
+            self.attemptedSetup = false
+        }
+    }
+
     private func preparePlayers() {
         guard !attemptedSetup else { return }
         attemptedSetup = true

@@ -89,17 +89,23 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     private var candidateListHeight: NSLayoutConstraint?
     private var portraitKeyAreaHeight: NSLayoutConstraint?
     private var appliedLayout: KeyboardLayoutConfiguration?
-    private let keyPreview = UILabel()
-    private weak var previewKey: UIButton?
+    private var keyPreview: KeyPreviewView?
+    private weak var previewKey: KeyboardButton?
     private var deleteHoldBounds: CGRect?
     private var deleteRepeatTask: Task<Void, Never>?
-    private var feedback = KeyboardPreferences.localFeedback {
+    private var feedback: KeyFeedbackSettings = {
+        var settings = KeyFeedbackSettings()
+        settings.volume = 0
+        settings.haptics = 0
+        return settings
+    }() {
         didSet {
             if oldValue.haptics != feedback.haptics { keyHaptic = nil }
             if feedback.volume == 0 { keyAudio.stop() }
         }
     }
     private var canPlayKeyFeedback = false
+    private var isKeyboardVisible = false
     private var keyHaptic: UIImpactFeedbackGenerator?
     private let keyAudio = KeyboardAudioFeedback()
 
@@ -134,7 +140,6 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     override func viewDidLoad() {
         super.viewDidLoad()
         (inputView as? KeyboardInputView)?.nearbyTouchTarget = expandCandidates
-        settingsObserver = KeyboardSettingsObserver { [weak self] in self?.reloadPreferences() }
         let divider = candidateDivider
         divider.backgroundColor = .separator
         divider.translatesAutoresizingMaskIntoConstraints = false
@@ -226,13 +231,12 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         updatePreferredKeyAreaHeight()
         setCandidatePanelVisible(false, animated: false)
 
-        configureKeyPreview()
         // viewWillAppear reads the input traits and builds the initial page once.
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        canPlayKeyFeedback = hasFullAccess
+        isKeyboardVisible = true
         refreshDocument(reloadCandidates: true)
     }
 
@@ -253,10 +257,14 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             self.prepareClickPlayers()
         }
 
-        reloadPreferences()
         DispatchQueue.main.async { [weak self] in
-            guard let self, !self.isSearchField, self.synchronizeSettings() else { return }
-            self.updateKeys()
+            guard let self, self.isKeyboardVisible else { return }
+            self.canPlayKeyFeedback = self.hasFullAccess
+            if self.settingsObserver == nil {
+                self.settingsObserver = KeyboardSettingsObserver { [weak self] in self?.reloadPreferences() }
+            }
+            self.reloadPreferences()
+            if !self.isSearchField, self.synchronizeSettings() { self.updateKeys() }
         }
     }
 
@@ -287,6 +295,9 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
+        isKeyboardVisible = false
+        canPlayKeyFeedback = false
+        settingsObserver = nil
         keyboardWarmup?.cancel()
         preferenceLoad?.cancel()
         keyAudio.stop()
@@ -294,8 +305,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         textWriter.reset()
         selectedSegments.removeAll()
         alternatePage = nil
-        keyPreview.isHidden = true
-        previewKey = nil
+        clearKeyPreview()
         candidateRefreshPending = false
         setCandidatePanelVisible(false, animated: false)
     }
@@ -303,6 +313,30 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     override func viewWillLayoutSubviews() {
         super.viewWillLayoutSubviews()
         updatePreferredKeyAreaHeight()
+    }
+
+    override func didReceiveMemoryWarning() {
+        super.didReceiveMemoryWarning()
+        keyboardWarmup?.cancel()
+        clearKeyPreview()
+        keyPreview?.removeFromSuperview()
+        keyPreview = nil
+        keyHaptic = nil
+        keyAudio.releaseResources()
+        let unusedPages = keyLayouts.keys.filter { !isKeyboardVisible || $0 != displayedPage }
+        for page in unusedPages { keyLayouts.removeValue(forKey: page)?.removeFromSuperview() }
+        if !isKeyboardVisible {
+            displayedPage = nil
+            candidateList.releaseCachedContent()
+            displayedCandidates.removeAll()
+            candidates.removeAll()
+            highlightsFirstCandidate = false
+            candidateRefreshPending = false
+            updateCandidateArrow()
+        }
+        if let lexicon {
+            Task.detached(priority: .utility) { lexicon.releaseUnusedMemory() }
+        }
     }
 
     override func viewDidLayoutSubviews() {
@@ -332,7 +366,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
 
     override func selectionDidChange(_ textInput: UITextInput?) {
         super.selectionDidChange(textInput)
-        if isViewLoaded, !isSearchField, !updatingDocument, synchronizeSettings() { updateKeys() }
+        if isViewLoaded, settingsObserver != nil, !isSearchField, !updatingDocument, synchronizeSettings() { updateKeys() }
     }
 
     private nonisolated static func loadLexicon() -> Lexicon {
@@ -359,6 +393,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
 
     private func refreshDocument(reloadCandidates: Bool = false) {
         let proxy = textDocumentProxy
+        let hadComposition = composition.hasInput || !textWriter.markedText.isEmpty
         let wasSearchField = isSearchField
         refreshInputTraits(from: proxy)
         let identifier = proxy.documentIdentifier
@@ -371,9 +406,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             alternatePage = nil
             setCandidatePanelVisible(false, animated: false)
             documentIdentifier = identifier
-            documentHasText = proxy.hasText
+            if hadComposition { documentHasText = proxy.hasText }
         }
-        if !isSearchField, changed || reloadCandidates { _ = synchronizeSettings() }
         updateKeys()
         if isSearchField && !composition.hasInput {
             // Keep the toolbar's height, but skip the idle candidate buttons in search fields.
@@ -472,8 +506,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         if visible && !candidateList.hasOverflow { return }
         if visible {
             stopDeleteHold()
-            keyPreview.isHidden = true
-            previewKey = nil
+            clearKeyPreview()
         }
         candidatePanel.setExpanded(visible, animated: animated)
         updateCandidateArrow()
@@ -715,17 +748,10 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         return KeyboardKeyRow(views: views, weights: keys.map(\.weight))
     }
 
-    private func configureKeyPreview() {
-        keyPreview.isHidden = true
-        keyPreview.isUserInteractionEnabled = false
-        keyPreview.isAccessibilityElement = false
-        keyPreview.textAlignment = .center
-        keyPreview.textColor = .label
-        keyPreview.backgroundColor = .secondarySystemGroupedBackground
-        keyPreview.font = .systemFont(ofSize: 30)
-        keyPreview.layer.cornerRadius = 9
-        keyPreview.clipsToBounds = true
-        view.addSubview(keyPreview)
+    private func clearKeyPreview() {
+        keyPreview?.isHidden = true
+        previewKey?.setPreviewPresented(false)
+        previewKey = nil
     }
 
     private func isOnDisplayedPage(_ button: UIButton) -> Bool {
@@ -775,19 +801,25 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         playKeyFeedback(at: sender.convert(CGPoint(x: sender.bounds.midX, y: sender.bounds.midY), to: view),
                         deleting: sender.isDeleteKey)
         guard let title = sender.previewTitle else { return }
+        clearKeyPreview()
+        if rows.layer.needsLayout() { rows.layoutIfNeeded() }
         let key = sender.convert(sender.bounds, to: view)
-        let width = max(44, key.width + 12)
-        let x = min(max(2, key.midX - width / 2), view.bounds.width - width - 2)
-        keyPreview.frame = CGRect(x: x, y: max(0, key.minY - 39), width: width, height: 42)
-        keyPreview.text = title
-        keyPreview.isHidden = false
+        let preview: KeyPreviewView
+        if let existing = keyPreview { preview = existing }
+        else {
+            preview = KeyPreviewView(frame: .zero)
+            keyPreview = preview
+            view.addSubview(preview)
+        }
+        view.bringSubviewToFront(preview)
+        preview.show(title, key: key, viewport: view.bounds, compact: traitCollection.verticalSizeClass == .compact)
+        sender.setPreviewPresented(true)
         previewKey = sender
     }
 
     @objc private func hideKeyPreview(_ sender: UIButton) {
         guard previewKey === sender else { return }
-        keyPreview.isHidden = true
-        previewKey = nil
+        clearKeyPreview()
     }
 
     private func showAlternatePage(_ page: Page?) {
@@ -1040,6 +1072,8 @@ private final class KeyboardButton: UIButton {
     var activatesOnTouchDown = false
     var isDeleteKey = false
     private var pinyinCaption: UILabel?
+    private var pinyinIsVisible = false
+    private var previewIsPresented = false
     private var shadowBounds: CGRect?
 
     override func accessibilityActivate() -> Bool {
@@ -1051,6 +1085,7 @@ private final class KeyboardButton: UIButton {
 
     func setPinyinVisible(_ visible: Bool) {
         guard let pinyin, let title = title(for: .normal) else { return }
+        pinyinIsVisible = visible
         // The one-line title still supplies the key's intrinsic size in both modes.
         if visible, pinyinCaption == nil {
             let caption = UILabel(frame: bounds)
@@ -1068,7 +1103,7 @@ private final class KeyboardButton: UIButton {
             addSubview(caption)
             pinyinCaption = caption
         }
-        pinyinCaption?.isHidden = !visible
+        pinyinCaption?.isHidden = !visible || previewIsPresented
         setTitleColor(visible ? .clear : .label, for: .normal)
         setTitleColor(visible ? .clear : .label, for: .highlighted)
         accessibilityLabel = visible ? "\(title)，\(pinyin)" : title
@@ -1082,6 +1117,13 @@ private final class KeyboardButton: UIButton {
     }
 
     override var isHighlighted: Bool {
-        didSet { alpha = isHighlighted ? 0.62 : 1 }
+        didSet { alpha = isHighlighted && !previewIsPresented ? 0.62 : 1 }
+    }
+
+    func setPreviewPresented(_ visible: Bool) {
+        previewIsPresented = visible
+        titleLabel?.isHidden = visible
+        pinyinCaption?.isHidden = visible || !pinyinIsVisible
+        alpha = isHighlighted && !visible ? 0.62 : 1
     }
 }

@@ -5,12 +5,20 @@ final class CandidateListView: UIScrollView {
     private let font = UIFont.systemFont(ofSize: 19)
     private let viewportMask = CAShapeLayer()
     private var maskedBounds = CGRect.null
-    private var buttons: [UIButton] = []
+    private var buttons: [CandidateButton] = []
     private var widths: [CGFloat] = []
     private var firstRowWidth: CGFloat = 0
     private(set) var isExpanded = false
     var onSelect: ((Int) -> Void)?
     var hasOverflow: Bool { firstRowWidth > 0 && widths.reduce(0, +) + CGFloat(max(0, widths.count - 1)) > firstRowWidth }
+
+    func releaseCachedContent() {
+        buttons.forEach { $0.removeFromSuperview() }
+        buttons.removeAll()
+        widths.removeAll()
+        setContentOffset(.zero, animated: false)
+        contentSize = .zero
+    }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -32,12 +40,12 @@ final class CandidateListView: UIScrollView {
         widths = titles.map { max(38, ceil(($0 as NSString).size(withAttributes: [.font: font]).width) + 12) }
         for (index, title) in titles.enumerated() {
             if index == buttons.count {
-                let button = UIButton(type: .custom)
+                let button = CandidateButton(type: .custom)
                 button.titleLabel?.font = font
                 button.titleLabel?.lineBreakMode = .byTruncatingTail
                 button.setTitleColor(.label, for: .normal)
-                button.setTitleColor(.secondaryLabel, for: .highlighted)
-                button.layer.cornerRadius = 6
+                button.setTitleColor(.label, for: .highlighted)
+                button.layer.cornerRadius = 8
                 button.addAction(UIAction { [weak self, weak button] _ in
                     guard let button else { return }
                     self?.onSelect?(button.tag)
@@ -49,7 +57,8 @@ final class CandidateListView: UIScrollView {
             button.tag = index
             button.setTitle(title, for: .normal)
             button.accessibilityLabel = title
-            button.backgroundColor = index == 0 && highlightsFirst ? .secondarySystemGroupedBackground : .clear
+            button.isHighlighted = false
+            button.isPrimaryCandidate = index == 0 && highlightsFirst
             button.isHidden = false
         }
         for button in buttons.dropFirst(titles.count) { button.isHidden = true }
@@ -70,7 +79,10 @@ final class CandidateListView: UIScrollView {
     func prepareTransition(expanded: Bool) {
         let offset = contentOffset
         setContentOffset(.zero, animated: false)
-        for button in buttons { button.frame = button.frame.offsetBy(dx: -offset.x, dy: -offset.y) }
+        for button in buttons {
+            button.isHighlighted = false
+            button.frame = button.frame.offsetBy(dx: -offset.x, dy: -offset.y)
+        }
         isExpanded = expanded
         showsVerticalScrollIndicator = expanded
     }
@@ -134,5 +146,21 @@ final class CandidateListView: UIScrollView {
     override func touchesShouldCancel(in view: UIView) -> Bool {
         // Every subview is a candidate control: a drag always takes priority over its pending tap.
         true
+    }
+}
+
+final class CandidateButton: UIButton {
+    var isPrimaryCandidate = false { didSet { updatePressAppearance() } }
+
+    override var isHighlighted: Bool { didSet { updatePressAppearance() } }
+
+    override func cancelTracking(with event: UIEvent?) {
+        super.cancelTracking(with: event)
+        isHighlighted = false
+    }
+
+    private func updatePressAppearance() {
+        // A cell-sized rounded press indicator; no pop-up or animation delays scrolling.
+        backgroundColor = isHighlighted ? .systemGray3 : (isPrimaryCandidate ? .secondarySystemGroupedBackground : .clear)
     }
 }
