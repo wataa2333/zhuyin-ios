@@ -6,6 +6,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		20A000000000000000000001 = {isa = PBXBuildFile; fileRef = 20A000000000000000000011; };
+		20A000000000000000000002 = {isa = PBXBuildFile; fileRef = 20A000000000000000000011; };
+		20A000000000000000000003 = {isa = PBXBuildFile; fileRef = 20A000000000000000000012; };
 		10A000000000000000000001 /* ZhuyinApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10A000000000000000000011; };
 		10A000000000000000000002 /* KeyboardViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10A000000000000000000012; };
 		10A000000000000000000003 /* ZhuyinEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10A000000000000000000013; };
@@ -40,6 +43,9 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		20A000000000000000000011 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CandidatePanelController.swift; sourceTree = "<group>"; };
+		20A000000000000000000012 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CandidatePanelTests.swift; sourceTree = "<group>"; };
+		20A000000000000000000013 = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CandidatePanelTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		10A000000000000000000011 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZhuyinApp.swift; sourceTree = "<group>"; };
 		10A000000000000000000012 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardViewController.swift; sourceTree = "<group>"; };
 		10A000000000000000000013 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZhuyinEngine.swift; sourceTree = "<group>"; };
@@ -54,6 +60,7 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		20A000000000000000000031 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		10A000000000000000000036 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		10A000000000000000000037 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXFrameworksBuildPhase section */
@@ -61,7 +68,7 @@
 /* Begin PBXGroup section */
 		10A000000000000000000041 = {
 			isa = PBXGroup;
-			children = (10A000000000000000000042, 10A000000000000000000043, 10A000000000000000000045, 10A000000000000000000044, );
+			children = (10A000000000000000000042, 10A000000000000000000043, 10A000000000000000000045, 20A000000000000000000041, 10A000000000000000000044, );
 			sourceTree = "<group>";
 		};
 		10A000000000000000000042 = {
@@ -72,13 +79,13 @@
 		};
 		10A000000000000000000043 = {
 			isa = PBXGroup;
-			children = (10A000000000000000000012, 10A000000000000000000013, 10A000000000000000000014, 10A000000000000000000015, 10A000000000000000000016, 10A00000000000000000001B, );
+			children = (10A000000000000000000012, 20A000000000000000000011, 10A000000000000000000013, 10A000000000000000000014, 10A000000000000000000015, 10A000000000000000000016, 10A00000000000000000001B, );
 			path = Keyboard;
 			sourceTree = "<group>";
 		};
 		10A000000000000000000044 = {
 			isa = PBXGroup;
-			children = (10A000000000000000000017, 10A000000000000000000018, );
+			children = (10A000000000000000000017, 10A000000000000000000018, 20A000000000000000000013, );
 			name = Products;
 			sourceTree = "<group>";
 		};
@@ -88,9 +95,21 @@
 			path = Shared;
 			sourceTree = "<group>";
 		};
+		20A000000000000000000041 = {isa = PBXGroup; children = (20A000000000000000000012, ); path = Tests; sourceTree = "<group>"; };
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		20A000000000000000000051 = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 20A000000000000000000081;
+			buildPhases = (20A000000000000000000032, 20A000000000000000000031, );
+			buildRules = ();
+			dependencies = ();
+			name = CandidatePanelTests;
+			productName = CandidatePanelTests;
+			productReference = 20A000000000000000000013;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		10A000000000000000000051 /* Zhuyin */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 10A000000000000000000082;
@@ -136,7 +155,7 @@
 			productRefGroup = 10A000000000000000000044;
 			projectDirPath = "";
 			projectRoot = "";
-			targets = (10A000000000000000000051, 10A000000000000000000052, );
+			targets = (10A000000000000000000051, 10A000000000000000000052, 20A000000000000000000051, );
 		};
 /* End PBXProject section */
 
@@ -146,8 +165,9 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		20A000000000000000000032 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (20A000000000000000000002, 20A000000000000000000003, ); runOnlyForDeploymentPostprocessing = 0; };
 		10A000000000000000000031 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (10A000000000000000000001, 10A000000000000000000007, ); runOnlyForDeploymentPostprocessing = 0; };
-		10A000000000000000000032 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (10A000000000000000000002, 10A000000000000000000003, 10A000000000000000000008, ); runOnlyForDeploymentPostprocessing = 0; };
+		10A000000000000000000032 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (10A000000000000000000002, 10A000000000000000000003, 10A000000000000000000008, 20A000000000000000000001, ); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -155,6 +175,26 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		20A000000000000000000061 = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wataa2333.zhuyin.CandidatePanelTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+			};
+			name = Debug;
+		};
+		20A000000000000000000062 = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wataa2333.zhuyin.CandidatePanelTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+			};
+			name = Release;
+		};
 		10A000000000000000000061 = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -252,6 +292,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		20A000000000000000000081 = {isa = XCConfigurationList; buildConfigurations = (20A000000000000000000061, 20A000000000000000000062, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 		10A000000000000000000081 = {isa = XCConfigurationList; buildConfigurations = (10A000000000000000000061, 10A000000000000000000062, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 		10A000000000000000000082 = {isa = XCConfigurationList; buildConfigurations = (10A000000000000000000063, 10A000000000000000000064, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 		10A000000000000000000083 = {isa = XCConfigurationList; buildConfigurations = (10A000000000000000000065, 10A000000000000000000066, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
