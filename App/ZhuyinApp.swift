@@ -11,7 +11,6 @@ struct ZhuyinApp: App {
 private struct SetupView: View {
     @State private var text = ""
     @State private var showsPinyin = KeyboardPreferences.showsPinyin
-    @State private var feedback = KeyboardPreferences.sharedFeedback ?? KeyboardPreferences.localFeedback
     @State private var savedLayout = KeyboardPreferences.layout
     @State private var needsKeyboardSync = KeyboardPreferences.pinyinFile == nil
     @FocusState private var isTyping: Bool
@@ -24,31 +23,12 @@ private struct SetupView: View {
                     Text("2. 选择「简体注音」。在输入时长按地球键切换到它。")
                     Text("字词查询在设备上运行，无需开启「允许完全访问」。")
                         .foregroundStyle(.secondary)
-                    Text("使用按键声和轻触反馈时，请在「设置 → 通用 → 键盘 → 键盘 → 简体注音」开启「允许完全访问」。按键声随 iPhone 静音模式关闭。")
-                        .foregroundStyle(.secondary)
                 }
 
                 Section("键盘设置") {
                     Toggle("按键显示拼音", isOn: Binding(get: { showsPinyin }, set: setPinyin))
-                    VStack(alignment: .leading) {
-                        Text("按键音量 \(feedback.volume)%")
-                        Slider(value: Binding(get: { Double(feedback.volume) }, set: {
-                            feedback.volume = UInt8($0.rounded())
-                            saveFeedback()
-                        }), in: 0...100, step: 5)
-                        .accessibilityLabel("按键音量")
-                    }
-                    Picker("按键触感", selection: Binding(get: { feedback.haptics }, set: {
-                        feedback.haptics = $0
-                        saveFeedback()
-                    })) {
-                        Text("关闭").tag(UInt8(0))
-                        Text("弱").tag(UInt8(1))
-                        Text("中").tag(UInt8(2))
-                        Text("强").tag(UInt8(3))
-                    }
                     if needsKeyboardSync {
-                        KeyboardSyncField(code: KeyboardPreferences.syncCode(pinyin: showsPinyin, feedback: feedback, layout: savedLayout))
+                        KeyboardSyncField(code: KeyboardPreferences.syncCode(pinyin: showsPinyin, layout: savedLayout))
                             .frame(minHeight: 40)
                             .overlay(alignment: .leading) {
                                 Label("打开键盘同步设置", systemImage: "keyboard")
@@ -63,7 +43,7 @@ private struct SetupView: View {
 
                 Section("键盘高度") {
                     NavigationLink {
-                        KeyboardLayoutEditor(savedLayout: $savedLayout, showsPinyin: showsPinyin, feedback: feedback)
+                        KeyboardLayoutEditor(savedLayout: $savedLayout, showsPinyin: showsPinyin)
                     } label: {
                         Label("实时预览与调节", systemImage: "slider.horizontal.3")
                     }
@@ -103,13 +83,4 @@ private struct SetupView: View {
         else { KeyboardPreferences.notifyChanged() }
     }
 
-    private func saveFeedback() {
-        KeyboardPreferences.saveLocally(feedback)
-        guard let file = KeyboardPreferences.feedbackFile else {
-            needsKeyboardSync = true
-            return
-        }
-        if (try? feedback.data.write(to: file, options: .atomic)) == nil { needsKeyboardSync = true }
-        else { KeyboardPreferences.notifyChanged() }
-    }
 }

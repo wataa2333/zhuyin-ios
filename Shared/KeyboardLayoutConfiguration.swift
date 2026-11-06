@@ -5,6 +5,7 @@ struct KeyboardLayoutConfiguration: Codable, Equatable, Sendable {
     static let defaults = Self()
     static let dividerHeight: CGFloat = 22
     static let dividerWidth: CGFloat = 1.25
+    static let candidateSeparatorPadding: CGFloat = 8
     static let candidateToggleWidth: CGFloat = 64
 
     var candidateBarHeight: CGFloat = 44
@@ -15,6 +16,7 @@ struct KeyboardLayoutConfiguration: Codable, Equatable, Sendable {
     var bottomInset: CGFloat = 0
 
     var keyAreaHeight: CGFloat { 4 * keyHeight + 3 * rowSpacing }
+    var candidateToggleTouchHeight: CGFloat { topInset + candidateBarHeight + toolbarSpacing }
     var candidatePanelHeight: CGFloat { candidateBarHeight + toolbarSpacing + keyAreaHeight }
     var contentHeight: CGFloat { topInset + candidatePanelHeight + bottomInset }
 

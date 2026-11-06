@@ -4,18 +4,16 @@ import UIKit
 struct KeyboardLayoutEditor: View {
     @Binding var savedLayout: KeyboardLayoutConfiguration
     let showsPinyin: Bool
-    let feedback: KeyFeedbackSettings
     @State private var draft: KeyboardLayoutConfiguration
     @State private var expanded = false
     @State private var status = ""
     @State private var failed = false
     @State private var showingApply = false
 
-    init(savedLayout: Binding<KeyboardLayoutConfiguration>, showsPinyin: Bool, feedback: KeyFeedbackSettings) {
+    init(savedLayout: Binding<KeyboardLayoutConfiguration>, showsPinyin: Bool) {
         _savedLayout = savedLayout
         _draft = State(initialValue: savedLayout.wrappedValue)
         self.showsPinyin = showsPinyin
-        self.feedback = feedback
     }
 
     var body: some View {
@@ -57,7 +55,7 @@ struct KeyboardLayoutEditor: View {
             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         }
         .sheet(isPresented: $showingApply) {
-            KeyboardApplySheet(code: KeyboardPreferences.syncCode(pinyin: showsPinyin, feedback: feedback, layout: savedLayout), onResult: {
+            KeyboardApplySheet(code: KeyboardPreferences.syncCode(pinyin: showsPinyin, layout: savedLayout), onResult: {
                 failed = !$0
                 status = $0 ? "实际键盘已接收并保存这组尺寸" : "键盘保存失败，请重新应用"
             })

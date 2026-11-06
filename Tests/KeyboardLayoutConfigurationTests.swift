@@ -54,25 +54,24 @@ final class KeyboardLayoutConfigurationTests: XCTestCase {
         var layout = KeyboardLayoutConfiguration.defaults
         layout.candidateBarHeight = 56
         layout.bottomInset = 12
-        let feedback = KeyFeedbackSettings()
-        let code = KeyboardPreferences.syncCode(pinyin: true, feedback: feedback, layout: layout)
+        let code = KeyboardPreferences.syncCode(pinyin: true, layout: layout)
         XCTAssertLessThanOrEqual(code.count, 64, "Must fit the text proxy's short surrounding context")
         let decoded = try XCTUnwrap(KeyboardPreferences.syncSettings(from: code))
         XCTAssertTrue(decoded.pinyin)
-        XCTAssertEqual(decoded.feedback, feedback)
         XCTAssertEqual(decoded.layout, layout)
         let legacy = try XCTUnwrap(KeyboardPreferences.syncSettings(from:
-            KeyboardPreferences.syncCode(pinyin: false, feedback: feedback)))
+            KeyboardPreferences.syncCode(pinyin: false)))
         XCTAssertFalse(legacy.pinyin)
         XCTAssertNil(legacy.layout)
+        XCTAssertFalse(try XCTUnwrap(KeyboardPreferences.syncSettings(from: "[[Zhuyin-Settings:0:40:1]]")).pinyin)
         XCTAssertNil(KeyboardPreferences.syncSettings(from: code.replacingOccurrences(of: ":56.0:", with: ":0.0:")))
     }
 
     func testReceiptMatchesOnlyTheSettingsRequestThatWasApplied() {
-        let first = KeyboardPreferences.syncCode(pinyin: true, feedback: KeyFeedbackSettings(), layout: .defaults)
+        let first = KeyboardPreferences.syncCode(pinyin: true, layout: .defaults)
         var layout = KeyboardLayoutConfiguration.defaults
         layout.candidateBarHeight = 60
-        let second = KeyboardPreferences.syncCode(pinyin: true, feedback: KeyFeedbackSettings(), layout: layout)
+        let second = KeyboardPreferences.syncCode(pinyin: true, layout: layout)
         XCTAssertEqual(KeyboardPreferences.syncReply(for: first), KeyboardPreferences.syncReply(for: first))
         XCTAssertNotEqual(KeyboardPreferences.syncReply(for: first), KeyboardPreferences.syncReply(for: second))
         XCTAssertNotEqual(KeyboardPreferences.syncReply(for: first), KeyboardPreferences.syncReply(for: first, succeeded: false))

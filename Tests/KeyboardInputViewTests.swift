@@ -53,13 +53,14 @@ final class KeyboardInputViewTests: XCTestCase {
 
     func testNearbyBlankSpaceActivatesToggleWithoutStealingAnotherControl() {
         let view = KeyboardInputView(frame: CGRect(x: 0, y: 0, width: 390, height: 242), inputViewStyle: .keyboard)
-        let toggle = NearbyTouchButton(type: .system)
+        let toggle = UIButton(type: .system)
         toggle.frame = CGRect(x: 326, y: 0, width: 64, height: 44)
         let slot = UIView(frame: toggle.frame)
         toggle.frame = slot.bounds
         slot.addSubview(toggle)
         view.addSubview(slot)
         view.nearbyTouchTarget = toggle
+        view.candidateToggleTouchArea = CGRect(x: 0, y: 0, width: 390, height: 56)
         let nearby = CGPoint(x: 318, y: 50)
         XCTAssertTrue(view.hitTest(nearby, with: nil) === toggle)
 
@@ -71,5 +72,22 @@ final class KeyboardInputViewTests: XCTestCase {
         XCTAssertTrue(view.hitTest(nearby, with: nil) === candidate)
         toggle.isHidden = true
         XCTAssertFalse(view.hitTest(CGPoint(x: 328, y: 50), with: nil) === toggle)
+    }
+
+    func testResizedBlankAreaIsCoveredWithoutTakingTouchesBelowTheHeader() {
+        let view = KeyboardInputView(frame: CGRect(x: 0, y: 0, width: 390, height: 320), inputViewStyle: .keyboard)
+        let toggle = UIButton(type: .system)
+        toggle.frame = CGRect(x: 326, y: 30, width: 64, height: 60)
+        view.addSubview(toggle)
+        view.nearbyTouchTarget = toggle
+        view.candidateToggleTouchArea = CGRect(x: 0, y: 0, width: 390, height: 102)
+        for point in [CGPoint(x: 380, y: 4), CGPoint(x: 315, y: 100), CGPoint(x: 100, y: 20)] {
+            XCTAssertTrue(view.hitTest(point, with: nil) === toggle)
+        }
+        XCTAssertFalse(view.hitTest(CGPoint(x: 380, y: 103), with: nil) === toggle)
+        let candidate = UIButton(type: .custom)
+        candidate.frame = CGRect(x: 20, y: 30, width: 60, height: 56)
+        view.addSubview(candidate)
+        XCTAssertTrue(view.hitTest(CGPoint(x: 50, y: 50), with: nil) === candidate)
     }
 }

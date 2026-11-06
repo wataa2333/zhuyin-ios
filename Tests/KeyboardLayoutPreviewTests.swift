@@ -50,12 +50,18 @@ final class KeyboardLayoutPreviewTests: XCTestCase {
                 XCTAssertEqual(keyFrame.minY, layout.topInset + layout.candidateBarHeight + layout.toolbarSpacing)
                 XCTAssertEqual(keyFrame.height, layout.keyAreaHeight)
                 XCTAssertEqual(keyFrame.maxY, layout.contentHeight - layout.bottomInset)
+                let divider = try XCTUnwrap(child("keyboard.divider", in: controller.view))
+                let dividerFrame = divider.convert(divider.bounds, to: controller.view)
+                XCTAssertEqual(dividerFrame.midY, listFrame.minY + (layout.candidateBarHeight - 4) / 2)
+                let input = try XCTUnwrap(controller.view as? KeyboardInputView)
+                XCTAssertEqual(input.candidateToggleTouchArea.height, layout.candidateToggleTouchHeight)
+                XCTAssertEqual(input.candidateToggleTouchArea.maxY, keyFrame.minY)
             }
         }
     }
 
     func testSyncFieldAcceptsOnlyAMatchingReceiptAndReportsItOnce() {
-        let code = KeyboardPreferences.syncCode(pinyin: true, feedback: KeyFeedbackSettings(), layout: .defaults)
+        let code = KeyboardPreferences.syncCode(pinyin: true, layout: .defaults)
         let coordinator = KeyboardSyncField.Coordinator()
         coordinator.success = KeyboardPreferences.syncReply(for: code)
         coordinator.failure = KeyboardPreferences.syncReply(for: code, succeeded: false)
@@ -76,11 +82,9 @@ final class KeyboardLayoutPreviewTests: XCTestCase {
     func testRealSettingsReceiverOverwritesPersistedAndVisibleDimensionsBeforeReplying() {
         let oldLayout = KeyboardPreferences.localLayout
         let oldPinyin = KeyboardPreferences.localPinyin
-        let oldFeedback = KeyboardPreferences.localFeedback
         addTeardownBlock {
             try? KeyboardPreferences.saveLocally(oldLayout)
             KeyboardPreferences.saveLocally(oldPinyin)
-            KeyboardPreferences.saveLocally(oldFeedback)
         }
         let controller = KeyboardViewController.makeLayoutPreview(.defaults, showsPinyin: false)
         controller.updateLayoutPreview(.defaults, showsPinyin: false, expanded: false)
@@ -88,7 +92,7 @@ final class KeyboardLayoutPreviewTests: XCTestCase {
         layout.candidateBarHeight = 40
         layout.topInset = 0
         layout.toolbarSpacing = 5
-        let code = KeyboardPreferences.syncCode(pinyin: true, feedback: oldFeedback, layout: layout)
+        let code = KeyboardPreferences.syncCode(pinyin: true, layout: layout)
         let proxy = SettingsProxy(code: code)
         XCTAssertTrue(controller.synchronizeSettings(using: proxy))
         XCTAssertEqual(KeyboardPreferences.localLayout, layout)

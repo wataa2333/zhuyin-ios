@@ -100,4 +100,22 @@ final class CandidateListTests: XCTestCase {
         XCTAssertEqual(list.contentSize.height, 60)
         XCTAssertTrue(buttons.allSatisfy { $0.frame.minY == 0 && $0.frame.height == 56 })
     }
+
+    func testTrailingCandidateIsNotCutThroughItsGlyphsOrTouchableBehindTheMask() throws {
+        let list = makeList()
+        list.frame.size.height = 44
+        list.layoutIfNeeded()
+        let buttons = list.subviews.compactMap { $0 as? UIButton }
+        let clipped = try XCTUnwrap(buttons.first { $0.frame.minX < 285 && $0.frame.maxX > 285 })
+        let coveredPoint = CGPoint(x: clipped.frame.minX + 1, y: 20)
+        let mask = try XCTUnwrap((list.layer.mask as? CAShapeLayer)?.path)
+        XCTAssertFalse(mask.contains(coveredPoint, using: .evenOdd))
+        XCTAssertFalse(list.point(inside: coveredPoint, with: nil))
+        let full = try XCTUnwrap(buttons.last { $0.frame.maxX <= 285 })
+        XCTAssertTrue(mask.contains(CGPoint(x: full.frame.midX, y: 20), using: .evenOdd))
+        list.prepareTransition(expanded: true)
+        list.applyLayout()
+        XCTAssertGreaterThan(clipped.frame.minY, 0)
+        XCTAssertFalse(clipped.isHidden)
+    }
 }

@@ -3,6 +3,7 @@ import UIKit
 /// Gives the host a deterministic height before any key pages have been laid out.
 final class KeyboardInputView: UIInputView {
     weak var nearbyTouchTarget: UIButton?
+    var candidateToggleTouchArea = CGRect.zero
     /// Fixed content bounds, independent of the host's transient presentation height.
     let contentLayoutGuide = UILayoutGuide()
     private lazy var contentHeightConstraint = contentLayoutGuide.heightAnchor.constraint(equalToConstant: contentHeight)
@@ -55,9 +56,9 @@ final class KeyboardInputView: UIInputView {
 
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         guard let original = super.hitTest(point, with: event) else { return nil }
-        guard bounds.contains(point), let target = nearbyTouchTarget,
+        guard bounds.contains(point), candidateToggleTouchArea.contains(point), let target = nearbyTouchTarget,
               !target.isHidden, target.isEnabled, target.isUserInteractionEnabled,
-              target.point(inside: target.convert(point, from: self), with: event) else { return original }
+              target.window === window else { return original }
         // Respect the normal hit result first. Never steal a candidate or another key's touch.
         var current: UIView? = original
         while let view = current, view !== self {
@@ -66,11 +67,5 @@ final class KeyboardInputView: UIInputView {
             current = view.superview
         }
         return target
-    }
-}
-
-final class NearbyTouchButton: UIButton {
-    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
-        bounds.insetBy(dx: -24, dy: -14).contains(point)
     }
 }

@@ -98,6 +98,8 @@ final class CandidateListView: UIScrollView {
     private var layoutWidth: CGFloat = 0
 
     func applyLayout() {
+        maskedBounds = .null
+        setNeedsLayout()
         layoutWidth = bounds.width
         guard layoutWidth > 0, firstRowWidth > 0 else { return }
         let rowHeight = candidateBarHeight - 4
@@ -113,7 +115,7 @@ final class CandidateListView: UIScrollView {
                     y += rowPitch
                 }
             }
-            let width = isExpanded ? min(intrinsicWidth, y == 0 ? firstRowWidth : layoutWidth) : intrinsicWidth
+            let width = min(intrinsicWidth, isExpanded && y > 0 ? layoutWidth : firstRowWidth)
             buttons[index].frame = CGRect(x: x, y: y, width: width, height: rowHeight)
             x += width + (isExpanded ? 4 : 1)
         }
@@ -131,13 +133,30 @@ final class CandidateListView: UIScrollView {
         maskedBounds = bounds
         let rect = CGRect(origin: .zero, size: bounds.size)
         let path = UIBezierPath(rect: rect)
-        path.append(UIBezierPath(rect: CGRect(x: firstRowWidth, y: 0,
-            width: max(0, rect.width - firstRowWidth), height: candidateBarHeight)))
+        let headerWidth = visibleHeaderWidth
+        path.append(UIBezierPath(rect: CGRect(x: headerWidth, y: 0,
+            width: max(0, rect.width - headerWidth), height: candidateBarHeight)))
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         viewportMask.frame = bounds
         viewportMask.path = path.cgPath
         CATransaction.commit()
+    }
+
+    private var visibleHeaderWidth: CGFloat {
+        guard !isExpanded, !widths.isEmpty else { return firstRowWidth }
+        // The trailing word is either fully visible or moves to the expanded list; never cut a glyph.
+        // Frames are ordered in strip mode, so scrolling needs only a binary search, not a cell walk.
+        let end = bounds.minX + firstRowWidth
+        var low = 0
+        var high = widths.count
+        while low < high {
+            let middle = (low + high) / 2
+            if buttons[middle].frame.maxX <= end { low = middle + 1 }
+            else { high = middle }
+        }
+        guard low > 0 else { return 0 }
+        return max(0, min(firstRowWidth, buttons[low - 1].frame.maxX - bounds.minX))
     }
 
     private func updateBounce() {
@@ -147,7 +166,7 @@ final class CandidateListView: UIScrollView {
 
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
         let viewportPoint = CGPoint(x: point.x - bounds.minX, y: point.y - bounds.minY)
-        if viewportPoint.y < candidateBarHeight && viewportPoint.x >= firstRowWidth { return false }
+        if viewportPoint.y < candidateBarHeight && viewportPoint.x >= visibleHeaderWidth { return false }
         return super.point(inside: point, with: event)
     }
 
