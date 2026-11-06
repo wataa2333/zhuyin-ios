@@ -60,7 +60,9 @@ python3 Tools/audit_character_coverage.py Keyboard/Lexicon.sqlite pinyin-data/pi
 python3 Tools/test_lexicon.py
 ```
 
-键盘尺寸集中在 `KeyboardLayoutConfiguration.swift`，首次显示前即使用固定尺寸，横竖屏变化时才切换配置。Spotlight 空闲状态不准备词库、韵母页和音效，首次输入按需打开预建索引。主 App 与扩展可直接离线使用，不需要复制词库到共享容器。
+键盘的所有内容高度统一读取 `keyboard-layout.json`，不按宿主高度、安全区或横竖屏自动测量、缩放或补偿。App 的「键盘固定高度」可手动调节候选栏高度、按键高度、按键行距、顶部留白、候选栏与按键间距和底部留白，点击「保存并应用」后原子写入配置文件，并通知键盘更新；重新打开继续使用保存的值。缺少共享容器权限时，点击同步栏可把固定配置保存到键盘本地文件。配置格式和默认值在 `Shared/KeyboardLayoutConfiguration.swift`，默认内容高度为 258 点；iOS 在扩展之外提供的地球键、麦克风与外部容器仍由系统管理。展开候选时，每行高度、按钮高度和箭头留空区统一使用保存的候选栏高度。App 设置页显示版本号，便于确认安装包。
+
+Spotlight 空闲状态不准备词库、韵母页和音效，首次输入按需打开预建索引。主 App 与扩展可直接离线使用，不需要复制词库到共享容器。
 
 Xcode 的 `CandidatePanelTests` scheme 包含候选切换、高度、分段上屏与词库查询回归测试。Windows 下的 Python 检查验证数据库完整性、覆盖、查询索引和只读访问；它不能替代 iOS 编译和真机手感验证。
 

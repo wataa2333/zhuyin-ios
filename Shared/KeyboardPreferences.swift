@@ -33,6 +33,35 @@ enum KeyboardPreferences {
 
     static var pinyinFile: URL? { sharedDirectory?.appendingPathComponent("pinyin-labels") }
     static var feedbackFile: URL? { sharedDirectory?.appendingPathComponent("key-feedback") }
+    static var layoutFile: URL? { sharedDirectory?.appendingPathComponent(KeyboardLayoutFile.name) }
+    private static var localLayoutFile: URL {
+        URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
+            .appendingPathComponent(KeyboardLayoutFile.name)
+    }
+
+    static var localLayout: KeyboardLayoutConfiguration {
+        KeyboardLayoutFile.read(from: localLayoutFile) ?? .defaults
+    }
+
+    static var sharedLayout: KeyboardLayoutConfiguration? {
+        layoutFile.flatMap { KeyboardLayoutFile.read(from: $0) }
+    }
+
+    static var layout: KeyboardLayoutConfiguration { sharedLayout ?? localLayout }
+
+    static func saveLocally(_ layout: KeyboardLayoutConfiguration) throws {
+        try KeyboardLayoutFile.save(layout, to: localLayoutFile)
+    }
+
+    /// The local copy supports installations without an App Group; the shared file is atomic too.
+    @discardableResult
+    static func saveLayout(_ layout: KeyboardLayoutConfiguration) throws -> Bool {
+        try saveLocally(layout)
+        guard let file = layoutFile else { return false }
+        try KeyboardLayoutFile.save(layout, to: file)
+        notifyChanged()
+        return true
+    }
 
     static var sharedPinyin: Bool? {
         if let file = pinyinFile, let data = try? Data(contentsOf: file) {
@@ -68,19 +97,34 @@ enum KeyboardPreferences {
         UserDefaults.standard.set(feedback.data, forKey: localFeedbackKey)
     }
 
-    static func syncCode(pinyin: Bool, feedback: KeyFeedbackSettings) -> String {
-        "[[Zhuyin-Settings:\(pinyin ? 1 : 0):\(feedback.volume):\(feedback.haptics)]]"
+    static func syncCode(pinyin: Bool, feedback: KeyFeedbackSettings, layout: KeyboardLayoutConfiguration? = nil) -> String {
+        var fields = [pinyin ? "1" : "0", String(feedback.volume), String(feedback.haptics)]
+        if let layout {
+            fields += [layout.candidateBarHeight, layout.keyHeight, layout.rowSpacing,
+                       layout.topInset, layout.toolbarSpacing, layout.bottomInset].map { String(Double($0)) }
+        }
+        return "[[Zhuyin-Settings:\(fields.joined(separator: ":"))]]"
     }
 
-    static func syncSettings(from code: String) -> (pinyin: Bool, feedback: KeyFeedbackSettings?)? {
-        if code == "[[Zhuyin-Pinyin:1]]" { return (true, nil) }
-        if code == "[[Zhuyin-Pinyin:0]]" { return (false, nil) }
+    static func syncSettings(from code: String) -> (pinyin: Bool, feedback: KeyFeedbackSettings?, layout: KeyboardLayoutConfiguration?)? {
+        if code == "[[Zhuyin-Pinyin:1]]" { return (true, nil, nil) }
+        if code == "[[Zhuyin-Pinyin:0]]" { return (false, nil, nil) }
         let prefix = "[[Zhuyin-Settings:"
         guard code.hasPrefix(prefix), code.hasSuffix("]]") else { return nil }
         let fields = code.dropFirst(prefix.count).dropLast(2).split(separator: ":", omittingEmptySubsequences: false)
-        guard fields.count == 3, fields[0] == "0" || fields[0] == "1",
+        guard fields.count == 3 || fields.count == 9, fields[0] == "0" || fields[0] == "1",
               let volume = UInt8(fields[1]), let haptics = UInt8(fields[2]),
               let feedback = KeyFeedbackSettings(data: Data([volume, haptics])) else { return nil }
-        return (fields[0] == "1", feedback)
+        var layout: KeyboardLayoutConfiguration?
+        if fields.count == 9 {
+            let values = fields.dropFirst(3).compactMap { Double($0) }
+            guard values.count == 6 else { return nil }
+            let decoded = KeyboardLayoutConfiguration(candidateBarHeight: CGFloat(values[0]), keyHeight: CGFloat(values[1]),
+                rowSpacing: CGFloat(values[2]), topInset: CGFloat(values[3]), toolbarSpacing: CGFloat(values[4]),
+                bottomInset: CGFloat(values[5]))
+            guard decoded.isValid else { return nil }
+            layout = decoded
+        }
+        return (fields[0] == "1", feedback, layout)
     }
 }

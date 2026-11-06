@@ -7,7 +7,7 @@ final class KeyboardInputView: UIInputView {
     let contentLayoutGuide = UILayoutGuide()
     private lazy var contentHeightConstraint = contentLayoutGuide.heightAnchor.constraint(equalToConstant: contentHeight)
     private lazy var requestedHeightConstraint = heightAnchor.constraint(equalToConstant: intrinsicContentSize.height)
-    var contentHeight: CGFloat = KeyboardLayoutConfiguration.portrait.contentHeight {
+    var contentHeight: CGFloat = KeyboardLayoutConfiguration.defaults.contentHeight {
         didSet {
             guard contentHeight != oldValue else { return }
             contentHeightConstraint.constant = contentHeight
@@ -17,6 +17,7 @@ final class KeyboardInputView: UIInputView {
 
     override init(frame: CGRect, inputViewStyle: UIInputView.Style) {
         super.init(frame: frame, inputViewStyle: inputViewStyle)
+        // Let UIKit honor our explicit fixed height; no host size or safe-area height is measured.
         allowsSelfSizing = true
         addLayoutGuide(contentLayoutGuide)
         requestedHeightConstraint.identifier = "Keyboard.requestedHeight"
@@ -33,12 +34,7 @@ final class KeyboardInputView: UIInputView {
     required init?(coder: NSCoder) { fatalError("Keyboard input views are created in code") }
 
     override var intrinsicContentSize: CGSize {
-        CGSize(width: UIView.noIntrinsicMetric, height: contentHeight + safeAreaInsets.bottom)
-    }
-
-    override func safeAreaInsetsDidChange() {
-        super.safeAreaInsetsDidChange()
-        updateHeightRequest()
+        CGSize(width: UIView.noIntrinsicMetric, height: contentHeight)
     }
 
     private func updateHeightRequest() {

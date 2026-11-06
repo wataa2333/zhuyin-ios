@@ -39,7 +39,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         "我", "你", "这", "那", "他", "有", "因为", "我们",
         "你好", "谢谢", "可以", "今天", "怎么", "现在", "知道", "好的"
     ]
-    private static let candidateBarHeight = KeyboardLayoutConfiguration.candidateBarHeight
+    private var fixedLayout = KeyboardPreferences.layout
     private static let emojiByWord = [
         "想": "🤔", "下": "⬇️", "心": "❤️", "爱": "❤️", "你好": "👋", "再见": "👋",
         "笑": "😄", "哈哈": "😂", "哭": "😢", "生气": "😡", "谢谢": "🙏", "赞": "👍",
@@ -87,8 +87,11 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     )
     private var showsCandidatePanel: Bool { candidatePanel.isExpanded }
     private var candidateListHeight: NSLayoutConstraint?
-    private var portraitKeyAreaHeight: NSLayoutConstraint?
-    private var appliedLayout: KeyboardLayoutConfiguration?
+    private var keyAreaHeight: NSLayoutConstraint?
+    private var toolbarHeight: NSLayoutConstraint?
+    private var contentTop: NSLayoutConstraint?
+    private var contentBottom: NSLayoutConstraint?
+    private var contentStack: UIStackView?
     private var keyPreview: KeyPreviewView?
     private weak var previewKey: KeyboardButton?
     private var deleteHoldBounds: CGRect?
@@ -134,19 +137,29 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     }
 
     override func loadView() {
-        inputView = KeyboardInputView(frame: .zero, inputViewStyle: .keyboard)
+        let keyboard = KeyboardInputView(frame: .zero, inputViewStyle: .keyboard)
+        keyboard.contentHeight = fixedLayout.contentHeight
+        inputView = keyboard
     }
 
     override func viewDidLoad() {
         super.viewDidLoad()
         (inputView as? KeyboardInputView)?.nearbyTouchTarget = expandCandidates
         let divider = candidateDivider
-        divider.backgroundColor = .separator
+        divider.backgroundColor = .secondaryLabel
+        divider.layer.cornerRadius = KeyboardLayoutConfiguration.dividerWidth / 2
+        divider.layer.shadowColor = UIColor.black.cgColor
+        divider.layer.shadowOpacity = 0.16
+        divider.layer.shadowRadius = 0.8
+        divider.layer.shadowOffset = CGSize(width: 0.5, height: 0)
+        divider.layer.shadowPath = UIBezierPath(roundedRect: CGRect(x: 0, y: 0,
+            width: KeyboardLayoutConfiguration.dividerWidth, height: KeyboardLayoutConfiguration.dividerHeight),
+            cornerRadius: KeyboardLayoutConfiguration.dividerWidth / 2).cgPath
         divider.translatesAutoresizingMaskIntoConstraints = false
         let dividerSlot = UIView()
         dividerSlot.addSubview(divider)
         NSLayoutConstraint.activate([
-            dividerSlot.widthAnchor.constraint(equalToConstant: 1 / max(1, traitCollection.displayScale)),
+            dividerSlot.widthAnchor.constraint(equalToConstant: KeyboardLayoutConfiguration.dividerWidth),
             divider.leadingAnchor.constraint(equalTo: dividerSlot.leadingAnchor),
             divider.trailingAnchor.constraint(equalTo: dividerSlot.trailingAnchor),
             divider.centerYAnchor.constraint(equalTo: dividerSlot.centerYAnchor),
@@ -173,7 +186,9 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         toolbar.isLayoutMarginsRelativeArrangement = true
         toolbar.layoutMargins = UIEdgeInsets(top: 0, left: sideInset, bottom: 0, right: 0)
         toolbar.spacing = 3
-        toolbar.heightAnchor.constraint(equalToConstant: Self.candidateBarHeight).isActive = true
+        let barHeight = toolbar.heightAnchor.constraint(equalToConstant: fixedLayout.candidateBarHeight)
+        barHeight.isActive = true
+        toolbarHeight = barHeight
         keyArea.clipsToBounds = true
         rows.translatesAutoresizingMaskIntoConstraints = false
         keyArea.addSubview(rows)
@@ -181,11 +196,13 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
 
         let layout = UIStackView(arrangedSubviews: [toolbar, keyArea])
         layout.axis = .vertical
-        layout.spacing = KeyboardLayoutConfiguration.toolbarSpacing
+        layout.spacing = fixedLayout.toolbarSpacing
+        contentStack = layout
         layout.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(layout)
         candidateList.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(candidateList)
+        candidateList.candidateBarHeight = fixedLayout.candidateBarHeight
         candidateList.onSelect = { [weak self] index in self?.selectCandidate(at: index) }
         candidatePanel.prepareTransition = { [weak self] expanded in
             guard let self else { return }
@@ -195,17 +212,20 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         candidatePanel.animateTransition = { [weak self] expanded in
             guard let self else { return }
             self.candidateListHeight?.constant = expanded
-                ? Self.candidateBarHeight + KeyboardLayoutConfiguration.toolbarSpacing + self.keyArea.bounds.height
-                : Self.candidateBarHeight
+                ? self.fixedLayout.candidatePanelHeight
+                : self.fixedLayout.candidateBarHeight
             self.candidateList.applyLayout()
             if !self.view.bounds.isEmpty { self.view.layoutIfNeeded() }
         }
         let area = (view as? KeyboardInputView)?.contentLayoutGuide ?? view.safeAreaLayoutGuide
+        let top = layout.topAnchor.constraint(equalTo: view.topAnchor, constant: fixedLayout.topInset)
+        let bottom = layout.bottomAnchor.constraint(equalTo: area.bottomAnchor, constant: -fixedLayout.bottomInset)
+        contentTop = top
+        contentBottom = bottom
         NSLayoutConstraint.activate([
             layout.leadingAnchor.constraint(equalTo: area.leadingAnchor),
             layout.trailingAnchor.constraint(equalTo: area.trailingAnchor),
-            layout.topAnchor.constraint(equalTo: view.topAnchor, constant: KeyboardLayoutConfiguration.topInset),
-            layout.bottomAnchor.constraint(equalTo: area.bottomAnchor),
+            top, bottom,
             arrowSlot.widthAnchor.constraint(equalToConstant: KeyboardLayoutConfiguration.candidateToggleWidth),
             expandCandidates.leadingAnchor.constraint(equalTo: arrowSlot.leadingAnchor),
             expandCandidates.trailingAnchor.constraint(equalTo: arrowSlot.trailingAnchor),
@@ -219,15 +239,14 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             candidateList.trailingAnchor.constraint(equalTo: rows.trailingAnchor),
             candidateList.topAnchor.constraint(equalTo: toolbar.topAnchor)
         ])
-        let listHeight = candidateList.heightAnchor.constraint(equalToConstant: Self.candidateBarHeight)
+        let listHeight = candidateList.heightAnchor.constraint(equalToConstant: fixedLayout.candidateBarHeight)
         listHeight.isActive = true
         candidateListHeight = listHeight
         let height = keyArea.heightAnchor.constraint(
-            equalToConstant: KeyboardLayoutConfiguration.portrait.keyAreaHeight
+            equalToConstant: fixedLayout.keyAreaHeight
         )
         height.isActive = true
-        portraitKeyAreaHeight = height
-        updatePreferredKeyAreaHeight()
+        keyAreaHeight = height
         setCandidatePanelVisible(false, animated: false)
 
         // viewWillAppear reads the input traits and builds the initial page once.
@@ -271,11 +290,16 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         preferenceLoad?.cancel()
         let previousFeedback = feedback
         let reading = Task.detached(priority: .utility) {
-            (KeyboardPreferences.showsPinyin, KeyboardPreferences.sharedFeedback ?? KeyboardPreferences.localFeedback)
+            (KeyboardPreferences.showsPinyin, KeyboardPreferences.sharedFeedback ?? KeyboardPreferences.localFeedback,
+             KeyboardPreferences.layout)
         }
         preferenceLoad = Task(priority: .utility) { [weak self] in
-            let (enabled, feedback) = await reading.value
+            let (enabled, feedback, layout) = await reading.value
             guard let self, !Task.isCancelled else { return }
+            if self.fixedLayout != layout {
+                try? KeyboardPreferences.saveLocally(layout)
+                self.applyLayoutConfiguration(layout)
+            }
             if self.feedback == previousFeedback, self.feedback != feedback {
                 KeyboardPreferences.saveLocally(feedback)
                 self.feedback = feedback
@@ -309,11 +333,6 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         setCandidatePanelVisible(false, animated: false)
     }
 
-    override func viewWillLayoutSubviews() {
-        super.viewWillLayoutSubviews()
-        updatePreferredKeyAreaHeight()
-    }
-
     override func didReceiveMemoryWarning() {
         super.didReceiveMemoryWarning()
         keyboardWarmup?.cancel()
@@ -341,19 +360,22 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         candidateList.updateViewport(firstRowWidth: candidateStripSlot.bounds.width)
-        if showsCandidatePanel {
-            let height = Self.candidateBarHeight + KeyboardLayoutConfiguration.toolbarSpacing + keyArea.bounds.height
-            if candidateListHeight?.constant != height { candidateListHeight?.constant = height }
-        }
         updateCandidateArrow()
     }
 
-    private func updatePreferredKeyAreaHeight() {
-        guard let height = portraitKeyAreaHeight else { return }
-        let configuration: KeyboardLayoutConfiguration = traitCollection.verticalSizeClass == .compact ? .compact : .portrait
-        guard configuration != appliedLayout else { return }
-        appliedLayout = configuration
-        height.constant = configuration.keyAreaHeight
+    private func applyLayoutConfiguration(_ configuration: KeyboardLayoutConfiguration) {
+        guard configuration.isValid, configuration != fixedLayout else { return }
+        stopDeleteHold()
+        clearKeyPreview()
+        setCandidatePanelVisible(false, animated: false)
+        fixedLayout = configuration
+        keyAreaHeight?.constant = configuration.keyAreaHeight
+        toolbarHeight?.constant = configuration.candidateBarHeight
+        candidateListHeight?.constant = configuration.candidateBarHeight
+        contentTop?.constant = configuration.topInset
+        contentBottom?.constant = -configuration.bottomInset
+        contentStack?.spacing = configuration.toolbarSpacing
+        candidateList.candidateBarHeight = configuration.candidateBarHeight
         (inputView as? KeyboardInputView)?.contentHeight = configuration.contentHeight
         for layout in keyLayouts.values { layout.spacing = configuration.rowSpacing }
     }
@@ -425,11 +447,21 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         let code = (proxy.documentContextBeforeInput ?? "") + (proxy.selectedText ?? "")
             + (proxy.documentContextAfterInput ?? "")
         guard let settings = KeyboardPreferences.syncSettings(from: code) else { return false }
+        var changed = false
+        if let layout = settings.layout, layout != fixedLayout, KeyboardPreferences.sharedLayout == nil {
+            preferenceLoad?.cancel()
+            do {
+                try KeyboardPreferences.saveLocally(layout)
+                applyLayoutConfiguration(layout)
+                changed = true
+            } catch { return false }
+        }
         if let syncedFeedback = settings.feedback, syncedFeedback != feedback, KeyboardPreferences.sharedFeedback == nil {
             KeyboardPreferences.saveLocally(syncedFeedback)
             feedback = syncedFeedback
+            changed = true
         }
-        guard showsPinyin != settings.pinyin, KeyboardPreferences.sharedPinyin == nil else { return false }
+        guard showsPinyin != settings.pinyin, KeyboardPreferences.sharedPinyin == nil else { return changed }
         preferenceLoad?.cancel()
         KeyboardPreferences.saveLocally(settings.pinyin)
         showsPinyin = settings.pinyin
@@ -568,7 +600,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         layout.axis = .vertical
         layout.distribution = .fillEqually
         layout.isHidden = true
-        layout.spacing = (appliedLayout ?? .portrait).rowSpacing
+        layout.spacing = fixedLayout.rowSpacing
         // The host can measure the keyboard before giving it a height.
         // Keep the key rows in the constraint chain so they contribute their intrinsic size.
         layout.translatesAutoresizingMaskIntoConstraints = false
@@ -636,7 +668,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         let numbers = Key(isPhonetic ? "123" : "ㄅㄆㄇ", label: isPhonetic ? "数字页" : "返回注音") { [weak self] in
             self?.showAlternatePage(isPhonetic ? .numbers : nil)
         }
-        let space = Key(isPhonetic ? "注" : "空格",
+        let space = Key(isPhonetic ? "注音输入法" : "空格",
                         weight: 5.42, label: isPhonetic ? "空格或一声" : "空格",
                         activatesOnTouchDown: isPhonetic) { [weak self] in self?.space() }
         let enter = Key(returnTitle == "换行" ? "" : returnTitle, weight: 2.15,
@@ -696,9 +728,9 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
                 }
                 if let image = key.systemImage {
                     button.setImage(UIImage(systemName: image, withConfiguration: UIImage.SymbolConfiguration(pointSize: 17)), for: .normal)
-                } else if key.title == "注" {
+                } else if key.title == "注音输入法" {
                     let marker = UILabel()
-                    marker.text = "注"
+                    marker.text = "注音输入法"
                     marker.textColor = .secondaryLabel
                     marker.font = .systemFont(ofSize: 12)
                     marker.isAccessibilityElement = false
@@ -1015,7 +1047,7 @@ private final class KeyboardKeyRow: UIView {
     private let keys: [UIView]
     private let weights: [CGFloat]
     private let totalWeight: CGFloat
-    private let preferredHeight = KeyboardLayoutConfiguration.portrait.keyHeight
+    private let preferredHeight = KeyboardLayoutConfiguration.defaults.keyHeight
 
     init(views: [UIView], weights: [CGFloat]) {
         keys = views

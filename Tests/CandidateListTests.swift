@@ -78,4 +78,26 @@ final class CandidateListTests: XCTestCase {
         XCTAssertEqual(list.subviews.compactMap { $0 as? UIButton }.count, 2)
         XCTAssertEqual(list.subviews.compactMap { ($0 as? UIButton)?.currentTitle }, ["你", "好"])
     }
+
+    func testManualCandidateHeightControlsRowsAndToggleHoleInBothModes() {
+        let list = makeList()
+        list.candidateBarHeight = 60
+        XCTAssertEqual(list.contentSize.height, 60)
+        XCTAssertFalse(list.point(inside: CGPoint(x: 310, y: 55), with: nil))
+        XCTAssertTrue(list.point(inside: CGPoint(x: 310, y: 65), with: nil))
+        list.prepareTransition(expanded: true)
+        list.applyLayout()
+        let buttons = list.subviews.compactMap { $0 as? UIButton }
+        XCTAssertTrue(buttons.allSatisfy { $0.frame.height == 56 })
+        XCTAssertTrue(buttons.allSatisfy { $0.frame.minY.truncatingRemainder(dividingBy: 60) == 0 })
+        XCTAssertTrue(buttons.contains { $0.frame.minY == 60 })
+        let frames = buttons.map(\.frame)
+        list.contentOffset.y = 90
+        list.layoutIfNeeded()
+        XCTAssertEqual(buttons.map(\.frame), frames)
+        list.prepareTransition(expanded: false)
+        list.applyLayout()
+        XCTAssertEqual(list.contentSize.height, 60)
+        XCTAssertTrue(buttons.allSatisfy { $0.frame.minY == 0 && $0.frame.height == 56 })
+    }
 }

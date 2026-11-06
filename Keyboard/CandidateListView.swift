@@ -8,6 +8,14 @@ final class CandidateListView: UIScrollView {
     private var buttons: [CandidateButton] = []
     private var widths: [CGFloat] = []
     private var firstRowWidth: CGFloat = 0
+    var candidateBarHeight: CGFloat = KeyboardLayoutConfiguration.defaults.candidateBarHeight {
+        didSet {
+            guard candidateBarHeight != oldValue else { return }
+            maskedBounds = .null
+            applyLayout()
+            setNeedsLayout()
+        }
+    }
     private(set) var isExpanded = false
     var onSelect: ((Int) -> Void)?
     var hasOverflow: Bool { firstRowWidth > 0 && widths.reduce(0, +) + CGFloat(max(0, widths.count - 1)) > firstRowWidth }
@@ -92,8 +100,8 @@ final class CandidateListView: UIScrollView {
     func applyLayout() {
         layoutWidth = bounds.width
         guard layoutWidth > 0, firstRowWidth > 0 else { return }
-        let rowHeight: CGFloat = 40
-        let rowPitch: CGFloat = 44
+        let rowHeight = candidateBarHeight - 4
+        let rowPitch = candidateBarHeight
         var x: CGFloat = 0
         var y: CGFloat = 0
         for (index, intrinsicWidth) in widths.enumerated() {
@@ -111,7 +119,7 @@ final class CandidateListView: UIScrollView {
         }
         contentSize = isExpanded
             ? CGSize(width: layoutWidth, height: widths.isEmpty ? 0 : y + rowHeight)
-            : CGSize(width: max(0, x - 1) + layoutWidth - firstRowWidth, height: KeyboardLayoutConfiguration.candidateBarHeight)
+            : CGSize(width: max(0, x - 1) + layoutWidth - firstRowWidth, height: candidateBarHeight)
         updateBounce()
     }
 
@@ -124,7 +132,7 @@ final class CandidateListView: UIScrollView {
         let rect = CGRect(origin: .zero, size: bounds.size)
         let path = UIBezierPath(rect: rect)
         path.append(UIBezierPath(rect: CGRect(x: firstRowWidth, y: 0,
-            width: max(0, rect.width - firstRowWidth), height: KeyboardLayoutConfiguration.candidateBarHeight)))
+            width: max(0, rect.width - firstRowWidth), height: candidateBarHeight)))
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         viewportMask.frame = bounds
@@ -139,7 +147,7 @@ final class CandidateListView: UIScrollView {
 
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
         let viewportPoint = CGPoint(x: point.x - bounds.minX, y: point.y - bounds.minY)
-        if viewportPoint.y < KeyboardLayoutConfiguration.candidateBarHeight && viewportPoint.x >= firstRowWidth { return false }
+        if viewportPoint.y < candidateBarHeight && viewportPoint.x >= firstRowWidth { return false }
         return super.point(inside: point, with: event)
     }
 

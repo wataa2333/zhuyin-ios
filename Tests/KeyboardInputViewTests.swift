@@ -6,16 +6,26 @@ final class KeyboardInputViewTests: XCTestCase {
     func testFirstMeasurementDoesNotDependOnKeyPagesOrPriorHostHeight() {
         let view = KeyboardInputView(frame: CGRect(x: 0, y: 0, width: 390, height: 100), inputViewStyle: .keyboard)
         XCTAssertTrue(view.allowsSelfSizing)
-        XCTAssertEqual(view.intrinsicContentSize.height, 242 + view.safeAreaInsets.bottom)
+        XCTAssertEqual(view.intrinsicContentSize.height, 258)
         view.frame.size.height = 180
-        XCTAssertEqual(view.intrinsicContentSize.height, 242 + view.safeAreaInsets.bottom)
+        XCTAssertEqual(view.intrinsicContentSize.height, 258)
         view.contentHeight = 193
-        XCTAssertEqual(view.intrinsicContentSize.height, 193 + view.safeAreaInsets.bottom)
+        XCTAssertEqual(view.intrinsicContentSize.height, 193)
+        let container = UIViewController()
+        container.view = UIView(frame: CGRect(x: 0, y: 0, width: 390, height: 193))
+        view.frame = container.view.bounds
+        container.view.addSubview(view)
+        container.additionalSafeAreaInsets = UIEdgeInsets(top: 30, left: 0, bottom: 40, right: 0)
+        container.view.layoutIfNeeded()
+        XCTAssertEqual(view.intrinsicContentSize.height, 193)
     }
 
     func testContentRemainsFixedAcrossTransientHostHeights() {
         let view = KeyboardInputView(frame: .zero, inputViewStyle: .keyboard)
-        for configuration in [KeyboardLayoutConfiguration.portrait, .compact, .portrait] {
+        var custom = KeyboardLayoutConfiguration.defaults
+        custom.keyHeight = 36
+        custom.candidateBarHeight = 60
+        for configuration in [KeyboardLayoutConfiguration.defaults, custom, .defaults] {
             view.contentHeight = configuration.contentHeight
             for hostHeight in [CGFloat(0), 180, 242, 260, 600] {
                 view.frame = CGRect(x: 0, y: 0, width: 390, height: hostHeight)
@@ -25,7 +35,7 @@ final class KeyboardInputViewTests: XCTestCase {
                 XCTAssertEqual(view.contentLayoutGuide.layoutFrame.height, configuration.contentHeight)
                 let fitting = view.systemLayoutSizeFitting(CGSize(width: 390, height: 0),
                     withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel)
-                XCTAssertEqual(fitting.height, configuration.contentHeight + view.safeAreaInsets.bottom)
+                XCTAssertEqual(fitting.height, configuration.contentHeight)
             }
         }
     }
