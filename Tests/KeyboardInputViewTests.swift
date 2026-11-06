@@ -13,6 +13,23 @@ final class KeyboardInputViewTests: XCTestCase {
         XCTAssertEqual(view.intrinsicContentSize.height, 193 + view.safeAreaInsets.bottom)
     }
 
+    func testContentRemainsFixedAcrossTransientHostHeights() {
+        let view = KeyboardInputView(frame: .zero, inputViewStyle: .keyboard)
+        for configuration in [KeyboardLayoutConfiguration.portrait, .compact, .portrait] {
+            view.contentHeight = configuration.contentHeight
+            for hostHeight in [CGFloat(0), 180, 242, 260, 600] {
+                view.frame = CGRect(x: 0, y: 0, width: 390, height: hostHeight)
+                view.setNeedsLayout()
+                view.layoutIfNeeded()
+                XCTAssertEqual(view.contentLayoutGuide.layoutFrame.minY, 0)
+                XCTAssertEqual(view.contentLayoutGuide.layoutFrame.height, configuration.contentHeight)
+                let fitting = view.systemLayoutSizeFitting(CGSize(width: 390, height: 0),
+                    withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel)
+                XCTAssertEqual(fitting.height, configuration.contentHeight + view.safeAreaInsets.bottom)
+            }
+        }
+    }
+
     func testNearbyBlankSpaceActivatesToggleWithoutStealingAnotherControl() {
         let view = KeyboardInputView(frame: CGRect(x: 0, y: 0, width: 390, height: 242), inputViewStyle: .keyboard)
         let toggle = NearbyTouchButton(type: .system)

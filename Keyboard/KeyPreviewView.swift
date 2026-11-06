@@ -4,8 +4,40 @@ struct KeyPreviewGeometry {
     let frame: CGRect
     let head: CGRect
     let keyBody: CGRect
-    let anchorLeft: CGPoint
-    let anchorRight: CGPoint
+
+    /// One closed contour avoids winding cancellation between overlapping head/neck/body paths.
+    var outline: UIBezierPath {
+        let headRadius: CGFloat = 10
+        let bodyRadius = min(9, min(keyBody.width, keyBody.height) / 2)
+        let shoulderY = head.maxY - headRadius
+        // Top-row heads can overlap the key. Keep a short, smooth waist in that case too.
+        let joinY = min(keyBody.maxY - bodyRadius, max(head.maxY + 6, keyBody.minY + 1))
+        let bend = (joinY - shoulderY) / 2
+        let path = UIBezierPath()
+        path.move(to: CGPoint(x: headRadius, y: head.minY))
+        path.addLine(to: CGPoint(x: head.maxX - headRadius, y: head.minY))
+        path.addQuadCurve(to: CGPoint(x: head.maxX, y: head.minY + headRadius),
+                          controlPoint: CGPoint(x: head.maxX, y: head.minY))
+        path.addLine(to: CGPoint(x: head.maxX, y: shoulderY))
+        path.addCurve(to: CGPoint(x: keyBody.maxX, y: joinY),
+                      controlPoint1: CGPoint(x: head.maxX, y: shoulderY + bend),
+                      controlPoint2: CGPoint(x: keyBody.maxX, y: joinY - bend))
+        path.addLine(to: CGPoint(x: keyBody.maxX, y: keyBody.maxY - bodyRadius))
+        path.addQuadCurve(to: CGPoint(x: keyBody.maxX - bodyRadius, y: keyBody.maxY),
+                          controlPoint: CGPoint(x: keyBody.maxX, y: keyBody.maxY))
+        path.addLine(to: CGPoint(x: keyBody.minX + bodyRadius, y: keyBody.maxY))
+        path.addQuadCurve(to: CGPoint(x: keyBody.minX, y: keyBody.maxY - bodyRadius),
+                          controlPoint: CGPoint(x: keyBody.minX, y: keyBody.maxY))
+        path.addLine(to: CGPoint(x: keyBody.minX, y: joinY))
+        path.addCurve(to: CGPoint(x: head.minX, y: shoulderY),
+                      controlPoint1: CGPoint(x: keyBody.minX, y: joinY - bend),
+                      controlPoint2: CGPoint(x: head.minX, y: shoulderY + bend))
+        path.addLine(to: CGPoint(x: head.minX, y: head.minY + headRadius))
+        path.addQuadCurve(to: CGPoint(x: headRadius, y: head.minY),
+                          controlPoint: CGPoint(x: head.minX, y: head.minY))
+        path.close()
+        return path
+    }
 
     init(key: CGRect, viewport: CGRect, compact: Bool) {
         let width = min(max(0, viewport.width - 4), max(compact ? 48 : 56, key.width + 20))
@@ -18,8 +50,6 @@ struct KeyPreviewGeometry {
         frame = CGRect(x: x, y: y, width: width, height: max(headHeight + neckHeight, key.maxY - y))
         head = CGRect(x: 0, y: 0, width: width, height: headHeight)
         keyBody = key.offsetBy(dx: -x, dy: -y)
-        anchorLeft = CGPoint(x: max(0, key.minX - x), y: headHeight + neckHeight)
-        anchorRight = CGPoint(x: min(width, key.maxX - x), y: headHeight + neckHeight)
     }
 }
 
@@ -50,22 +80,7 @@ final class KeyPreviewView: UIView {
 
     func show(_ text: String, key: CGRect, viewport: CGRect, compact: Bool) {
         let geometry = KeyPreviewGeometry(key: key, viewport: viewport, compact: compact)
-        let path = UIBezierPath(roundedRect: geometry.head, cornerRadius: 10)
-        let neck = UIBezierPath()
-        let left = CGPoint(x: 5, y: geometry.head.maxY - 8)
-        let right = CGPoint(x: geometry.head.maxX - 5, y: left.y)
-        neck.move(to: left)
-        neck.addCurve(to: geometry.anchorLeft,
-            controlPoint1: CGPoint(x: left.x, y: geometry.head.maxY + 4),
-            controlPoint2: CGPoint(x: geometry.anchorLeft.x, y: geometry.anchorLeft.y - 8))
-        neck.addLine(to: geometry.anchorRight)
-        neck.addCurve(to: right,
-            controlPoint1: CGPoint(x: geometry.anchorRight.x, y: geometry.anchorRight.y - 8),
-            controlPoint2: CGPoint(x: right.x, y: geometry.head.maxY + 4))
-        neck.close()
-        path.append(neck)
-        // Cover the source key as well, including when touch-down immediately changes key pages.
-        path.append(UIBezierPath(roundedRect: geometry.keyBody, cornerRadius: 9))
+        let path = geometry.outline
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         frame = geometry.frame

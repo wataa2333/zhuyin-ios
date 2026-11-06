@@ -3,15 +3,30 @@ import UIKit
 /// Gives the host a deterministic height before any key pages have been laid out.
 final class KeyboardInputView: UIInputView {
     weak var nearbyTouchTarget: UIButton?
+    /// Fixed content bounds, independent of the host's transient presentation height.
+    let contentLayoutGuide = UILayoutGuide()
+    private lazy var contentHeightConstraint = contentLayoutGuide.heightAnchor.constraint(equalToConstant: contentHeight)
+    private lazy var requestedHeightConstraint = heightAnchor.constraint(equalToConstant: intrinsicContentSize.height)
     var contentHeight: CGFloat = KeyboardLayoutConfiguration.portrait.contentHeight {
         didSet {
-            if contentHeight != oldValue { invalidateIntrinsicContentSize() }
+            guard contentHeight != oldValue else { return }
+            contentHeightConstraint.constant = contentHeight
+            updateHeightRequest()
         }
     }
 
     override init(frame: CGRect, inputViewStyle: UIInputView.Style) {
         super.init(frame: frame, inputViewStyle: inputViewStyle)
         allowsSelfSizing = true
+        addLayoutGuide(contentLayoutGuide)
+        requestedHeightConstraint.identifier = "Keyboard.requestedHeight"
+        NSLayoutConstraint.activate([
+            contentLayoutGuide.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor),
+            contentLayoutGuide.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor),
+            contentLayoutGuide.topAnchor.constraint(equalTo: topAnchor),
+            contentHeightConstraint,
+            requestedHeightConstraint
+        ])
     }
 
     @available(*, unavailable)
@@ -23,6 +38,13 @@ final class KeyboardInputView: UIInputView {
 
     override func safeAreaInsetsDidChange() {
         super.safeAreaInsetsDidChange()
+        updateHeightRequest()
+    }
+
+    private func updateHeightRequest() {
+        let height = intrinsicContentSize.height
+        guard requestedHeightConstraint.constant != height else { return }
+        requestedHeightConstraint.constant = height
         invalidateIntrinsicContentSize()
     }
 

@@ -200,7 +200,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             self.candidateList.applyLayout()
             if !self.view.bounds.isEmpty { self.view.layoutIfNeeded() }
         }
-        let area = view.safeAreaLayoutGuide
+        let area = (view as? KeyboardInputView)?.contentLayoutGuide ?? view.safeAreaLayoutGuide
         NSLayoutConstraint.activate([
             layout.leadingAnchor.constraint(equalTo: area.leadingAnchor),
             layout.trailingAnchor.constraint(equalTo: area.trailingAnchor),
@@ -225,7 +225,6 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         let height = keyArea.heightAnchor.constraint(
             equalToConstant: KeyboardLayoutConfiguration.portrait.keyAreaHeight
         )
-        height.priority = UILayoutPriority(999)
         height.isActive = true
         portraitKeyAreaHeight = height
         updatePreferredKeyAreaHeight()
