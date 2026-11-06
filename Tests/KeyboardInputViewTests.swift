@@ -40,6 +40,17 @@ final class KeyboardInputViewTests: XCTestCase {
         }
     }
 
+    func testBothSystemFittingQueriesAlwaysReturnTheConfiguredHeight() {
+        let view = KeyboardInputView(frame: .zero, inputViewStyle: .keyboard)
+        view.contentHeight = 240
+        for proposedHeight in [CGFloat(0), 180, 260, 800] {
+            let target = CGSize(width: 390, height: proposedHeight)
+            XCTAssertEqual(view.systemLayoutSizeFitting(target), CGSize(width: 390, height: 240))
+            XCTAssertEqual(view.systemLayoutSizeFitting(target, withHorizontalFittingPriority: .required,
+                verticalFittingPriority: .required), CGSize(width: 390, height: 240))
+        }
+    }
+
     func testNearbyBlankSpaceActivatesToggleWithoutStealingAnotherControl() {
         let view = KeyboardInputView(frame: CGRect(x: 0, y: 0, width: 390, height: 242), inputViewStyle: .keyboard)
         let toggle = NearbyTouchButton(type: .system)

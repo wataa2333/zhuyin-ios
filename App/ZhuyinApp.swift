@@ -13,9 +13,6 @@ private struct SetupView: View {
     @State private var showsPinyin = KeyboardPreferences.showsPinyin
     @State private var feedback = KeyboardPreferences.sharedFeedback ?? KeyboardPreferences.localFeedback
     @State private var savedLayout = KeyboardPreferences.layout
-    @State private var draftLayout = KeyboardPreferences.layout
-    @State private var layoutStatus = ""
-    @State private var layoutSaveFailed = false
     @State private var needsKeyboardSync = KeyboardPreferences.pinyinFile == nil
     @FocusState private var isTyping: Bool
 
@@ -64,30 +61,13 @@ private struct SetupView: View {
                     }
                 }
 
-                Section("键盘固定高度") {
-                    Text("横竖屏、不同 App 使用同一组固定尺寸，不自动测量或调节高度。修改后点「保存并应用」。")
-                        .foregroundStyle(.secondary)
-                    layoutStepper("候选栏高度", \.candidateBarHeight, range: 40...80)
-                    layoutStepper("按键高度", \.keyHeight, range: 32...60)
-                    layoutStepper("按键行距", \.rowSpacing, range: 0...16)
-                    layoutStepper("顶部留白", \.topInset, range: 0...30)
-                    layoutStepper("候选栏与按键间距", \.toolbarSpacing, range: 0...12)
-                    layoutStepper("底部留白", \.bottomInset, range: 0...40)
-                    LabeledContent("键盘内容总高度", value: "\(Int(draftLayout.contentHeight)) 点")
-                    Button("保存并应用", action: saveLayout)
-                    Button("恢复默认高度") {
-                        draftLayout = .defaults
-                        saveLayout()
+                Section("键盘高度") {
+                    NavigationLink {
+                        KeyboardLayoutEditor(savedLayout: $savedLayout, showsPinyin: showsPinyin, feedback: feedback)
+                    } label: {
+                        Label("实时预览与调节", systemImage: "slider.horizontal.3")
                     }
-                    if !needsKeyboardSync {
-                        Button("手动同步到键盘") { needsKeyboardSync = true }
-                    }
-                    if !layoutStatus.isEmpty {
-                        Text(layoutStatus)
-                            .foregroundStyle(layoutSaveFailed ? Color.red : Color.secondary)
-                    }
-                    Text("保存后下次启动仍使用该配置。系统底部的地球键、麦克风区域由 iOS 管理。")
-                        .foregroundStyle(.secondary)
+                    LabeledContent("已保存的内容高度", value: "\(Int(savedLayout.contentHeight)) 点")
                 }
 
                 Section("试打") {
@@ -111,31 +91,6 @@ private struct SetupView: View {
         }
     }
 
-    private func layoutStepper(_ title: String, _ field: WritableKeyPath<KeyboardLayoutConfiguration, CGFloat>,
-                               range: ClosedRange<CGFloat>) -> some View {
-        Stepper(value: Binding(get: { draftLayout[keyPath: field] }, set: {
-            draftLayout[keyPath: field] = $0
-            layoutStatus = "有未保存的修改"
-            layoutSaveFailed = false
-        }), in: range, step: 1) {
-            Text("\(title) \(Int(draftLayout[keyPath: field])) 点")
-        }
-    }
-
-    private func saveLayout() {
-        do {
-            let shared = try KeyboardPreferences.saveLayout(draftLayout)
-            savedLayout = draftLayout
-            if !shared { needsKeyboardSync = true }
-            layoutSaveFailed = false
-            layoutStatus = shared ? "已保存并应用" : "已保存，请点同步栏应用到键盘"
-        } catch {
-            needsKeyboardSync = true
-            layoutSaveFailed = true
-            layoutStatus = "保存失败，请重试。"
-        }
-    }
-
     private func setPinyin(_ enabled: Bool) {
         KeyboardPreferences.saveLocally(enabled)
         showsPinyin = enabled
@@ -156,41 +111,5 @@ private struct SetupView: View {
         }
         if (try? feedback.data.write(to: file, options: .atomic)) == nil { needsKeyboardSync = true }
         else { KeyboardPreferences.notifyChanged() }
-    }
-}
-
-private struct KeyboardSyncField: UIViewRepresentable {
-    let code: String
-
-    func makeCoordinator() -> Coordinator { Coordinator() }
-
-    func makeUIView(context: Context) -> UITextField {
-        let field = UITextField()
-        field.textColor = .clear
-        field.tintColor = .clear
-        field.textContentType = .nickname
-        field.autocorrectionType = .no
-        field.spellCheckingType = .no
-        field.accessibilityLabel = "打开键盘同步设置"
-        field.delegate = context.coordinator
-        return field
-    }
-
-    func updateUIView(_ field: UITextField, context: Context) {
-        guard field.text != code else { return }
-        if field.isFirstResponder { field.resignFirstResponder() }
-        field.text = code
-    }
-
-    final class Coordinator: NSObject, UITextFieldDelegate {
-        func textFieldDidBeginEditing(_ textField: UITextField) {
-            let end = textField.endOfDocument
-            textField.selectedTextRange = textField.textRange(from: end, to: end)
-        }
-
-        func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange,
-                       replacementString string: String) -> Bool {
-            false
-        }
     }
 }

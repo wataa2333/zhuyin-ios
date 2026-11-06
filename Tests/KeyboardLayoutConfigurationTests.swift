@@ -67,4 +67,15 @@ final class KeyboardLayoutConfigurationTests: XCTestCase {
         XCTAssertNil(legacy.layout)
         XCTAssertNil(KeyboardPreferences.syncSettings(from: code.replacingOccurrences(of: ":56.0:", with: ":0.0:")))
     }
+
+    func testReceiptMatchesOnlyTheSettingsRequestThatWasApplied() {
+        let first = KeyboardPreferences.syncCode(pinyin: true, feedback: KeyFeedbackSettings(), layout: .defaults)
+        var layout = KeyboardLayoutConfiguration.defaults
+        layout.candidateBarHeight = 60
+        let second = KeyboardPreferences.syncCode(pinyin: true, feedback: KeyFeedbackSettings(), layout: layout)
+        XCTAssertEqual(KeyboardPreferences.syncReply(for: first), KeyboardPreferences.syncReply(for: first))
+        XCTAssertNotEqual(KeyboardPreferences.syncReply(for: first), KeyboardPreferences.syncReply(for: second))
+        XCTAssertNotEqual(KeyboardPreferences.syncReply(for: first), KeyboardPreferences.syncReply(for: first, succeeded: false))
+        XCTAssertNil(KeyboardPreferences.syncSettings(from: KeyboardPreferences.syncReply(for: first)))
+    }
 }

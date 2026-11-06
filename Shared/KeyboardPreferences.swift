@@ -33,7 +33,6 @@ enum KeyboardPreferences {
 
     static var pinyinFile: URL? { sharedDirectory?.appendingPathComponent("pinyin-labels") }
     static var feedbackFile: URL? { sharedDirectory?.appendingPathComponent("key-feedback") }
-    static var layoutFile: URL? { sharedDirectory?.appendingPathComponent(KeyboardLayoutFile.name) }
     private static var localLayoutFile: URL {
         URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
             .appendingPathComponent(KeyboardLayoutFile.name)
@@ -43,24 +42,15 @@ enum KeyboardPreferences {
         KeyboardLayoutFile.read(from: localLayoutFile) ?? .defaults
     }
 
-    static var sharedLayout: KeyboardLayoutConfiguration? {
-        layoutFile.flatMap { KeyboardLayoutFile.read(from: $0) }
-    }
-
-    static var layout: KeyboardLayoutConfiguration { sharedLayout ?? localLayout }
+    // Height has one authority in each sandbox. Explicit sync directly overwrites the keyboard's copy.
+    static var layout: KeyboardLayoutConfiguration { localLayout }
 
     static func saveLocally(_ layout: KeyboardLayoutConfiguration) throws {
         try KeyboardLayoutFile.save(layout, to: localLayoutFile)
     }
 
-    /// The local copy supports installations without an App Group; the shared file is atomic too.
-    @discardableResult
-    static func saveLayout(_ layout: KeyboardLayoutConfiguration) throws -> Bool {
+    static func saveLayout(_ layout: KeyboardLayoutConfiguration) throws {
         try saveLocally(layout)
-        guard let file = layoutFile else { return false }
-        try KeyboardLayoutFile.save(layout, to: file)
-        notifyChanged()
-        return true
     }
 
     static var sharedPinyin: Bool? {
@@ -104,6 +94,12 @@ enum KeyboardPreferences {
                        layout.topInset, layout.toolbarSpacing, layout.bottomInset].map { String(Double($0)) }
         }
         return "[[Zhuyin-Settings:\(fields.joined(separator: ":"))]]"
+    }
+
+    static func syncReply(for code: String, succeeded: Bool = true) -> String {
+        // A deterministic request identifier; this is matching, not authentication.
+        let token = code.utf8.reduce(UInt64(14695981039346656037)) { ($0 ^ UInt64($1)) &* 1099511628211 }
+        return "[[Zhuyin-\(succeeded ? "Applied" : "Failed"):\(String(token, radix: 16))]]"
     }
 
     static func syncSettings(from code: String) -> (pinyin: Bool, feedback: KeyFeedbackSettings?, layout: KeyboardLayoutConfiguration?)? {

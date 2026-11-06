@@ -37,6 +37,15 @@ final class KeyboardInputView: UIInputView {
         CGSize(width: UIView.noIntrinsicMetric, height: contentHeight)
     }
 
+    override func systemLayoutSizeFitting(_ targetSize: CGSize) -> CGSize {
+        CGSize(width: targetSize.width, height: contentHeight)
+    }
+
+    override func systemLayoutSizeFitting(_ targetSize: CGSize, withHorizontalFittingPriority horizontalFittingPriority: UILayoutPriority,
+                                         verticalFittingPriority: UILayoutPriority) -> CGSize {
+        CGSize(width: targetSize.width, height: contentHeight)
+    }
+
     private func updateHeightRequest() {
         let height = intrinsicContentSize.height
         guard requestedHeightConstraint.constant != height else { return }
